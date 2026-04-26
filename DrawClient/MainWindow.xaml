@@ -1,0 +1,23 @@
+﻿<Window x:Class="DrawClient.MainWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        Title="Client"
+        Height="250"
+        Width="300">
+
+    <StackPanel Margin="10">
+
+        <TextBox Name="txtIP"
+                 Text="127.0.0.1"
+                 Margin="0,0,0,10"/>
+
+        <TextBox Name="txtPort"
+                 Text="5000"
+                 Margin="0,0,0,10"/>
+
+        <Button Content="Connect"
+                Click="btnConnect_Click"/>
+
+    </StackPanel>
+
+</Window>
