@@ -1,117 +1,205 @@
 ﻿using System;
+using System.Collections.Concurrent;
+using System.Collections.Generic;
+using System.Linq;
 using System.Net;
 using System.Net.Sockets;
 using System.Text;
 using System.Threading;
-using System.Collections.Generic;
+using System.Text.Json;
 
 namespace DrawServer
 {
     public class ServerSocket
     {
+        // thread-safe collections
+        private ConcurrentDictionary<string, List<TcpClient>> rooms
+            = new ConcurrentDictionary<string, List<TcpClient>>();
+
         private TcpListener server;
-        private List<TcpClient> clients =
-            new List<TcpClient>();
+
+        // thread-safe list
+        private List<TcpClient> clients = new List<TcpClient>();
+        private object clientLock = new object();
+        private object roomLock = new object();
 
         public Action<string> OnMessageReceived;
 
-        // Khởi động Server
         public void Start(int port)
         {
-            server = new TcpListener(
-                IPAddress.Any,
-                port);
-
+            server = new TcpListener(IPAddress.Any, port);
             server.Start();
 
-            Thread listenThread =
-                new Thread(ListenClient);
+            Console.WriteLine("Server started at port " + port);
 
+            Thread listenThread = new Thread(ListenClient);
             listenThread.IsBackground = true;
             listenThread.Start();
         }
 
-        // Lắng nghe Client
         private void ListenClient()
         {
             while (true)
             {
-                TcpClient client =
-                    server.AcceptTcpClient();
+                TcpClient client = server.AcceptTcpClient();
 
-                clients.Add(client);
+                // disable Nagle for realtime drawing
+                client.NoDelay = true;
 
-                Thread clientThread =
-                    new Thread(() =>
-                        HandleClient(client));
+                Console.WriteLine("Client connected!");
 
+                lock (clientLock)
+                {
+                    clients.Add(client);
+                }
+
+                Thread clientThread = new Thread(() => HandleClient(client));
                 clientThread.IsBackground = true;
                 clientThread.Start();
             }
         }
 
-        // Xử lý từng Client
-        private void HandleClient(
-            TcpClient client)
+        private void HandleClient(TcpClient client)
         {
-            NetworkStream stream =
-                client.GetStream();
+            NetworkStream stream = client.GetStream();
+            byte[] buffer = new byte[1024];
 
-            byte[] buffer =
-                new byte[1024];
+            // safer buffer handling
+            StringBuilder dataBuffer = new StringBuilder();
 
             try
             {
                 while (true)
                 {
-                    int bytesRead =
-                        stream.Read(
-                            buffer,
-                            0,
-                            buffer.Length);
+                    int bytesRead = stream.Read(buffer, 0, buffer.Length);
 
                     if (bytesRead == 0)
                         break;
 
-                    string message =
-                        Encoding.UTF8
-                        .GetString(
-                            buffer,
-                            0,
-                            bytesRead);
+                    dataBuffer.Append(Encoding.UTF8.GetString(buffer, 0, bytesRead));
 
-                    // Gửi cho tất cả Client khác
-                    Broadcast(message);
+                    while (true)
+                    {
+                        string current = dataBuffer.ToString();
+                        int index = current.IndexOf("\n");
 
-                    OnMessageReceived?.Invoke(
-                        message);
+                        if (index == -1) break;
+
+                        string message = current.Substring(0, index);
+                        dataBuffer.Remove(0, index + 1);
+
+                        Console.WriteLine("Received: " + message);
+
+                        DrawMessage data = null;
+
+                        // avoid crash on bad JSON
+                        try
+                        {
+                            data = JsonSerializer.Deserialize<DrawMessage>(message);
+                        }
+                        catch
+                        {
+                            continue;
+                        }
+
+                        if (data == null) continue;
+
+                        if (data.type == "JOIN")
+                        {
+                            if (!rooms.ContainsKey(data.roomId))
+                            {
+                                rooms[data.roomId] = new List<TcpClient>();
+                            }
+
+                            lock (roomLock)
+                            {
+                                rooms[data.roomId].Add(client);
+                            }
+                        }
+                        else if (data.type == "DRAW")
+                        {
+                            BroadcastToRoom(data.roomId, message + "\n");
+                        }
+                    }
                 }
             }
             catch
             {
-                clients.Remove(client);
+                Console.WriteLine("Client disconnected");
+            }
+            finally
+            {
+                // cleanup client everywhere
+
+                lock (clientLock)
+                {
+                    clients.Remove(client);
+                }
+
+                foreach (var room in rooms)
+                {
+                    lock (roomLock)
+                    {
+                        room.Value.Remove(client);
+                    }
+                }
+
+                try
+                {
+                    stream.Close();
+                    client.Close();
+                }
+                catch { }
             }
         }
 
-        // Gửi dữ liệu cho tất cả Client
         private void Broadcast(string message)
         {
-            byte[] data =
-                Encoding.UTF8.GetBytes(message);
+            byte[] data = Encoding.UTF8.GetBytes(message);
 
-            foreach (var client in clients)
+            lock (clientLock)
             {
-                try
+                foreach (var client in clients.ToList())
                 {
-                    NetworkStream stream =
-                        client.GetStream();
-
-                    stream.Write(
-                        data,
-                        0,
-                        data.Length);
+                    try
+                    {
+                        client.GetStream().Write(data, 0, data.Length);
+                    }
+                    catch
+                    {
+                        // remove dead client
+                        clients.Remove(client);
+                    }
                 }
-                catch { }
+            }
+        }
+
+        private void BroadcastToRoom(string roomId, string message)
+        {
+            if (!rooms.ContainsKey(roomId)) return;
+
+            byte[] data = Encoding.UTF8.GetBytes(message);
+
+            lock (roomLock)
+            {
+                foreach (var client in rooms[roomId].ToList())
+                {
+                    try
+                    {
+                        client.GetStream().Write(data, 0, data.Length);
+                    }
+                    catch
+                    {
+                        //remove dead client
+                        rooms[roomId].Remove(client);
+                    }
+                }
+
+                // remove empty room
+                if (rooms[roomId].Count == 0)
+                {
+                    rooms.TryRemove(roomId, out _);
+                }
             }
         }
     }
