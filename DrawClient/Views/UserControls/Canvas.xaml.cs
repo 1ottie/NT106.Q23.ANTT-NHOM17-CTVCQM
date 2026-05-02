@@ -1,4 +1,5 @@
-﻿using System;
+﻿using DrawClient.ViewModels;
+using System;
 using System.Text.Json;
 using System.Windows;
 using System.Windows.Controls;
@@ -13,15 +14,28 @@ namespace DrawClient.Views.UserControls
         private Point lastPoint;
         private bool isDrawing = false;
 
+        private CanvasViewModel _viewModel;
+
         public Canvas()
         {
             InitializeComponent();
 
-            // FIX: tránh null crash
-            if (MainWindow.clientSocket != null)
+            this.Loaded += (s, e) =>
             {
-                MainWindow.clientSocket.OnMessageReceived += OnServerMessage;
-            }
+                _viewModel = this.DataContext as CanvasViewModel;
+                if (_viewModel != null)
+                {
+                    _viewModel.OnLineReceived += DrawNetworkLine;
+                }
+            };
+
+            this.Unloaded += (s, e) =>
+            {
+                if (_viewModel != null)
+                {
+                    _viewModel.OnLineReceived -= DrawNetworkLine;
+                }
+            };
         }
 
         private void Canvas_MouseDown(object sender, MouseButtonEventArgs e)
@@ -43,29 +57,14 @@ namespace DrawClient.Views.UserControls
             Point currentPoint = e.GetPosition(MyCanvas);
 
             // vẽ local
-            DrawLine(lastPoint, currentPoint);
-
-            // gửi data
-            var obj = new DrawMessage
-            {
-                type = "DRAW",
-                roomId = "room1",
-                x1 = lastPoint.X,
-                y1 = lastPoint.Y,
-                x2 = currentPoint.X,
-                y2 = currentPoint.Y,
-                color = "#000000",
-                thickness = 2
-            };
-
-            string json = JsonSerializer.Serialize(obj);
-
-            MainWindow.clientSocket?.Send(json);
+            DrawLineLocal(lastPoint, currentPoint, _viewModel.CurrentColor, _viewModel.CurrentThickness);
+            
+            _viewModel.SendDrawData(lastPoint, currentPoint);
 
             lastPoint = currentPoint;
         }
 
-        private void DrawLine(Point p1, Point p2)
+        private void DrawLineLocal(Point p1, Point p2, string hexColor, double thickness)
         {
             StylusPointCollection points = new StylusPointCollection
             {
@@ -77,47 +76,21 @@ namespace DrawClient.Views.UserControls
             {
                 DrawingAttributes = new DrawingAttributes
                 {
-                    Color = Colors.Black,
-                    Width = 2,
-                    Height = 2
+                    Color = (Color)ColorConverter.ConvertFromString(hexColor),
+                    Width = thickness,
+                    Height = thickness
                 }
             };
 
             MyCanvas.Strokes.Add(stroke);
         }
 
-        private void OnServerMessage(string msg)
+        private void DrawNetworkLine(Point p1, Point p2, string hexColor, double thickness)
         {
-            try
+            Application.Current.Dispatcher.Invoke(() =>
             {
-                Application.Current.Dispatcher.Invoke(() =>
-                {
-                    var data = JsonSerializer.Deserialize<DrawMessage>(msg);
-
-                    if (data == null) return;
-
-                    if (data.type == "DRAW")
-                    {
-                        Point p1 = new Point(data.x1, data.y1);
-                        Point p2 = new Point(data.x2, data.y2);
-
-                        DrawLine(p1, p2);
-                    }
-                });
-            }
-            catch
-            {
-                // tránh crash UI thread
-            }
-        }
-
-        // tránh leak event khi reload UI
-        ~Canvas()
-        {
-            if (MainWindow.clientSocket != null)
-            {
-                MainWindow.clientSocket.OnMessageReceived -= OnServerMessage;
-            }
+                DrawLineLocal(p1, p2, hexColor, thickness);
+            });
         }
     }
 }

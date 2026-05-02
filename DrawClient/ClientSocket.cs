@@ -19,7 +19,7 @@ namespace DrawClient
 
         private string currentRoomId;
 
-        public bool Connect(string ip, int port, string roomId)
+        public bool Connect(string ip, int port)
         {
             try
             {
@@ -29,14 +29,6 @@ namespace DrawClient
                 client.Connect(ip, port);
 
                 stream = client.GetStream();
-                currentRoomId = roomId;
-
-                // JOIN
-                Send(new DrawMessage
-                {
-                    type = "JOIN",
-                    roomId = currentRoomId
-                });
 
                 receiveThread = new Thread(ReceiveLoop);
                 receiveThread.IsBackground = true;
@@ -51,6 +43,21 @@ namespace DrawClient
                 Console.WriteLine("CONNECT ERROR: " + ex.Message);
                 return false;
             }
+        }
+
+        public void JoinRoom(string roomId)
+        {
+            if (client == null || !client.Connected) return;
+
+            currentRoomId = roomId;
+
+            Send(new DrawMessage
+            {
+                type = "JOIN",
+                roomId = currentRoomId
+            });
+
+            Console.WriteLine($"Sent request to join room: {roomId}");
         }
 
         #region RECEIVE
@@ -126,20 +133,6 @@ namespace DrawClient
             catch (Exception ex)
             {
                 Console.WriteLine("Parse DrawMessage error: " + ex.Message);
-            }
-
-            try
-            {
-                var evt = JsonSerializer.Deserialize<DrawEvent>(msg);
-                if (evt != null && !string.IsNullOrEmpty(evt.type))
-                {
-                    OnMessageReceived?.Invoke(msg);
-                    return;
-                }
-            }
-            catch (Exception ex)
-            {
-                Console.WriteLine("Parse DrawEvent error: " + ex.Message);
             }
         }
         #endregion

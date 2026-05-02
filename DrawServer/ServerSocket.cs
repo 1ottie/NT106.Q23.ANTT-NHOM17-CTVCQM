@@ -106,7 +106,7 @@ namespace DrawServer
             // thử parse DrawEvent
             try
             {
-                var drawEvent = JsonSerializer.Deserialize<DrawEvent>(msg);
+                var drawEvent = JsonSerializer.Deserialize<DrawMessage>(msg);
 
                 if (drawEvent != null && !string.IsNullOrEmpty(drawEvent.type))
                 {

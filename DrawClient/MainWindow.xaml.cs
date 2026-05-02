@@ -11,16 +11,6 @@ namespace DrawClient
         {
             InitializeComponent();
 
-            bool ok = clientSocket.Connect("127.0.0.1", 5000);
-
-            if (!ok)
-            {
-                MessageBox.Show("Connected fail");
-                return;
-            }
-
-            MessageBox.Show("Connected");
-
             this.DataContext = new MainViewModel();
         }
 

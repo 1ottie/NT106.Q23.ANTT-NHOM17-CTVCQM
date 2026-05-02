@@ -7,6 +7,7 @@ using System.Windows.Media;
 using DrawClient.Models;
 using System.Security.Policy;
 using System.Windows;
+using System;
 
 namespace DrawClient.ViewModels
 {
@@ -65,6 +66,7 @@ namespace DrawClient.ViewModels
             set { _currentThickness = value; OnPropertyChanged(); }
         }
 
+        public event Action<Point, Point, string, double> OnLineReceived;
         public CanvasViewModel()
         {
             // Mock Data
@@ -91,18 +93,18 @@ namespace DrawClient.ViewModels
 
         // Logic gửi dữ liệu lên mạng
 
-        public void SendDrawData(double x1, double y1, double x2, double y2)
+        public void SendDrawData(Point p1, Point p2)
         {
-            DrawMessage msg = new DrawMessage
+            var msg = new DrawMessage
             {
                 type = "DRAW",
                 roomId = "room1", // Tạm fix cứng, sau này lấy từ thông tin phòng
-                x1 = x1,
-                y1 = y1,
-                x2 = x2,
-                y2 = y2,
-                color = CurrentColor,
-                thickness = CurrentThickness
+                x1 = p1.X,
+                y1 = p1.Y,
+                x2 = p2.X,
+                y2 = p2.Y,
+                color = this.CurrentColor,
+                thickness = this.CurrentThickness
             };
 
             ClientSocket.Instance.Send(msg);
