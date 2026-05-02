@@ -2,6 +2,11 @@
 using System.ComponentModel;
 using System.Runtime.CompilerServices;
 using System.Windows.Input;
+using System.Text.Json;
+using System.Windows.Media;
+using DrawClient.Models;
+using System.Security.Policy;
+using System.Windows;
 
 namespace DrawClient.ViewModels
 {
@@ -17,8 +22,7 @@ namespace DrawClient.ViewModels
         public string Message { get; set; }
         public string Time { get; set; }
     }
-
-    public class WhiteboardViewModel : INotifyPropertyChanged
+    public class CanvasViewModel : INotifyPropertyChanged
     {
         // Danh sách dữ liệu
         public ObservableCollection<UserParticipant> Users { get; set; }
@@ -47,7 +51,21 @@ namespace DrawClient.ViewModels
             set { _activeTool = value; OnPropertyChanged(); }
         }
 
-        public WhiteboardViewModel()
+        private string _currentColor = "#000000";
+        public string CurrentColor
+        {
+            get => _currentColor;
+            set { _currentColor = value; OnPropertyChanged(); }
+        }
+
+        private double _currentThickness = 2.0;
+        public double CurrentThickness
+        {
+            get => _currentThickness;
+            set { _currentThickness = value; OnPropertyChanged(); }
+        }
+
+        public CanvasViewModel()
         {
             // Mock Data
             Users = new ObservableCollection<UserParticipant>
@@ -69,6 +87,25 @@ namespace DrawClient.ViewModels
                 new ChatMessage { User = "Sarah Chen", Message = "alooo", Time = "14:20" },
                 new ChatMessage { User = "Mike Johnson", Message = "aaalo", Time = "14:21" }
             };
+        }
+
+        // Logic gửi dữ liệu lên mạng
+
+        public void SendDrawData(double x1, double y1, double x2, double y2)
+        {
+            DrawMessage msg = new DrawMessage
+            {
+                type = "DRAW",
+                roomId = "room1", // Tạm fix cứng, sau này lấy từ thông tin phòng
+                x1 = x1,
+                y1 = y1,
+                x2 = x2,
+                y2 = y2,
+                color = CurrentColor,
+                thickness = CurrentThickness
+            };
+
+            ClientSocket.Instance.Send(msg);
         }
 
         public event PropertyChangedEventHandler PropertyChanged;

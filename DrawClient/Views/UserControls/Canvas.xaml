@@ -132,7 +132,7 @@
             <Grid Grid.Column="0" ClipToBounds="True">
 
                 <InkCanvas x:Name="MyCanvas" Panel.ZIndex="1"
-                           MouseDown="Canvas_MouseDown" MouseMove="Canvas_MouseMove">
+                           MouseDown="Canvas_MouseDown" MouseMove="Canvas_MouseMove" MouseUp="Canvas_MouseUp">
                     <InkCanvas.Background>
                         <DrawingBrush Viewport="0,0,30,30" ViewportUnits="Absolute" TileMode="Tile" Stretch="None">
                             <DrawingBrush.Drawing>

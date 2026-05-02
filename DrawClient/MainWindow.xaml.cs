@@ -16,7 +16,6 @@ namespace DrawClient
             if (!ok)
             {
                 MessageBox.Show("Connected fail");
-                Application.Current.Shutdown();
                 return;
             }
 

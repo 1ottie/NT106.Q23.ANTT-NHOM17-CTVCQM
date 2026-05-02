@@ -35,7 +35,7 @@ namespace DrawClient.ViewModels
 
         private void NavigateToCanvas()
         {
-            var canvasVM = new WhiteboardViewModel();
+            var canvasVM = new CanvasViewModel();
             CurrentView = canvasVM;
         }
 

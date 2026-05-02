@@ -1,4 +1,5 @@
 ﻿using System;
+using System.Windows;
 using System.Windows.Input;
 
 namespace DrawClient.ViewModels
@@ -15,14 +16,27 @@ namespace DrawClient.ViewModels
         public LoginViewModel()
         {
             ConnectCommand = new RelayCommand(ExecuteConnect);
+            ServerIp = "127.0.0.1";
+            Port = "5000";
+            Username = "aa";
         }
 
         private void ExecuteConnect(object obj)
         {
-            // Viết code kiểm tra IP, Port ở đây
+            int portNum = int.Parse(Port);
 
-            // Chuyển trang sang sảnh chờ
-            GoToLobby?.Invoke();
+            bool isConnected = ClientSocket.Instance.Connect(ServerIp, portNum);
+
+            if (isConnected)
+            {
+                MessageBox.Show("Kết nối thành công tới " + ServerIp);
+                GoToLobby?.Invoke();
+            }
+            else
+            {
+                MessageBox.Show("Kết nối thất bại!");
+            }
+
         }
     }
 }

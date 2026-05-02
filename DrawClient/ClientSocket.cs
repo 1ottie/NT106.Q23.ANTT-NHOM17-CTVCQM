@@ -8,6 +8,7 @@ namespace DrawClient
 {
     public class ClientSocket
     {
+        public static ClientSocket Instance { get; } = new ClientSocket();
         private TcpClient client;
         private NetworkStream stream;
         private Thread receiveThread;

@@ -60,7 +60,7 @@ namespace DrawClient.Views.UserControls
 
             string json = JsonSerializer.Serialize(obj);
 
-            MainWindow.clientSocket?.Send(json + "\n");
+            MainWindow.clientSocket?.Send(json);
 
             lastPoint = currentPoint;
         }

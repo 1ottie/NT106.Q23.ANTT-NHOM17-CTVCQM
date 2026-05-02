@@ -20,7 +20,7 @@
             <views:Dashboard />
         </DataTemplate>
 
-        <DataTemplate DataType="{x:Type viewmodels:WhiteboardViewModel}">
+        <DataTemplate DataType="{x:Type viewmodels:CanvasViewModel}">
             <usercontrols:Canvas />
         </DataTemplate>
     </Window.Resources>
