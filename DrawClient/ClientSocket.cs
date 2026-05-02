@@ -14,106 +14,102 @@ namespace DrawClient
 
         public Action<string> OnMessageReceived;
 
+        private StringBuilder buffer = new StringBuilder();
+
         public bool Connect(string ip, int port)
         {
             try
             {
                 client = new TcpClient();
-
-                Console.WriteLine("Connecting to server...");
                 client.Connect(ip, port);
-
-                if (!client.Connected)
-                {
-                    Console.WriteLine("Connect failed!");
-                    return false;
-                }
 
                 stream = client.GetStream();
 
-                // FIX: gửi JOIN đúng protocol JSON
-                var joinObj = new DrawMessage
+                SendInternal(new DrawMessage
                 {
                     type = "JOIN",
                     roomId = "room1"
-                };
+                });
 
-                string json = JsonSerializer.Serialize(joinObj);
-                Send(json + "\n");
-
-                // FIX: start receive thread đúng chỗ
-                receiveThread = new Thread(ReceiveData);
+                receiveThread = new Thread(ReceiveLoop);
                 receiveThread.IsBackground = true;
                 receiveThread.Start();
 
-                Console.WriteLine("Connected SUCCESS!");
                 return true;
             }
             catch (Exception ex)
             {
-                Console.WriteLine("Connect ERROR: " + ex.Message);
+                Console.WriteLine("CONNECT ERROR: " + ex.Message);
                 return false;
             }
         }
 
-        private void ReceiveData()
+        #region RECEIVE
+        private void ReceiveLoop()
         {
-            byte[] buffer = new byte[1024];
-            StringBuilder dataBuffer = new StringBuilder();
+            byte[] data = new byte[4096];
 
             try
             {
-                while (true)
+                while (client.Connected)
                 {
-                    int bytesRead = stream.Read(buffer, 0, buffer.Length);
+                    int len = stream.Read(data, 0, data.Length);
+                    if (len <= 0) continue;
 
-                    if (bytesRead == 0)
-                        break;
+                    buffer.Append(Encoding.UTF8.GetString(data, 0, len));
 
-                    dataBuffer.Append(Encoding.UTF8.GetString(buffer, 0, bytesRead));
-
-                    while (true)
-                    {
-                        string current = dataBuffer.ToString();
-                        int index = current.IndexOf("\n");
-
-                        if (index == -1) break;
-
-                        string message = current.Substring(0, index);
-                        dataBuffer.Remove(0, index + 1);
-
-                        HandleMessage(message);
-                    }
+                    ProcessBuffer();
                 }
             }
             catch (Exception ex)
             {
-                Console.WriteLine("Receive ERROR: " + ex.Message);
+                Console.WriteLine("RECEIVE ERROR: " + ex.Message);
             }
         }
 
-        public void Send(string message)
+        private void ProcessBuffer()
+        {
+            while (true)
+            {
+                string content = buffer.ToString();
+                int index = content.IndexOf('\n');
+
+                if (index < 0) break;
+
+                string msg = content.Substring(0, index);
+                buffer.Remove(0, index + 1);
+
+                HandleMessage(msg);
+            }
+        }
+        #endregion
+
+        #region SEND
+        public void Send(object obj)
+        {
+            string json = JsonSerializer.Serialize(obj);
+            SendInternal(json);
+        }
+
+        private void SendInternal(object obj)
         {
             try
             {
-                if (stream != null && client != null && client.Connected)
-                {
-                    byte[] data = Encoding.UTF8.GetBytes(message);
-                    stream.Write(data, 0, data.Length);
+                if (stream == null) return;
 
-                    Console.WriteLine("Sent: " + message);
-                }
-                else
-                {
-                    Console.WriteLine("Send failed: Not connected");
-                }
+                string json = obj is string s ? s : JsonSerializer.Serialize(obj);
+
+                byte[] data = Encoding.UTF8.GetBytes(json + "\n");
+                stream.Write(data, 0, data.Length);
             }
             catch (Exception ex)
             {
-                Console.WriteLine("Send ERROR: " + ex.Message);
+                Console.WriteLine("SEND ERROR: " + ex.Message);
             }
         }
+        #endregion
 
+        #region HANDLE
         private void HandleMessage(string msg)
         {
             try
@@ -122,15 +118,21 @@ namespace DrawClient
 
                 if (data == null) return;
 
-                if (data.type == "DRAW")
+                switch (data.type)
                 {
-                    OnMessageReceived?.Invoke(msg);
+                    case "DRAW":
+                    case "stroke_move":
+                    case "stroke_start":
+                    case "stroke_end":
+                        OnMessageReceived?.Invoke(msg);
+                        break;
                 }
             }
             catch
             {
-                Console.WriteLine("JSON parse lỗi");
+                Console.WriteLine("INVALID JSON: " + msg);
             }
         }
+        #endregion
     }
 }
