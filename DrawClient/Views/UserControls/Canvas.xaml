@@ -182,7 +182,7 @@
 
             <Grid Grid.Column="0" ClipToBounds="True">
 
-                <!-- ĐÃ SỬA: Thay đổi cấu hình sự kiện và vô hiệu hóa chế độ vẽ nội bộ của InkCanvas -->
+                <!--Thay đổi cấu hình sự kiện và vô hiệu hóa chế độ vẽ nội bộ của InkCanvas -->
                 <InkCanvas x:Name="MyCanvas" Grid.Column="0" 
                            EditingMode="None"
                            MouseDown="Canvas_MouseDown" 

@@ -16,7 +16,10 @@ namespace DrawClient.ViewModels
         public static string CurrentMasterIp { get; set; } = "127.0.0.1";
         public static int CurrentMasterPort { get; set; } = 5000;
 
-        //lưu token
+        // Lưu trữ UserId để các ViewModel khác và Socket có thể sử dụng
+        public static int CurrentUserId { get; set; }
+
+        // lưu token
         public static string Token { get; set; }
 
         public LoginViewModel()
@@ -32,6 +35,11 @@ namespace DrawClient.ViewModels
             // Lưu lại IP và Port của Master Server
             CurrentMasterIp = ServerIp;
             CurrentMasterPort = int.Parse(Port);
+
+            // GHI CHÚ: Trong logic đăng nhập thực tế của bạn, sau khi nhận Token từ API,
+            // bạn hãy gán: CurrentUserId = [ID nhận được từ API];
+            // Ví dụ tạm thời để test:
+            CurrentUserId = 8;
 
             // Bỏ qua kết nối TCP lúc này. Chỉ cần chuyển sang Lobby. 
             // Việc kết nối mạng thực sự sẽ diễn ra khi người dùng chọn phòng.

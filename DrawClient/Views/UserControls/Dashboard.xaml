@@ -65,7 +65,7 @@
 
             <ScrollViewer Grid.Column="0" Padding="32" VerticalScrollBarVisibility="Auto">
                 <StackPanel>
-                    <!-- THAY THẾ NÚT "+ NEW ROOM" BẰNG KHỐI NÀY -->
+                    <!-- 2 khối tạo phòng và tham gia phòng -->
                     <Grid Margin="0,0,0,24">
                         <Grid.ColumnDefinitions>
                             <ColumnDefinition Width="*"/>

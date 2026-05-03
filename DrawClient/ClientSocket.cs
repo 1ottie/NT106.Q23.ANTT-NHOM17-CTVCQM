@@ -18,7 +18,7 @@ namespace DrawClient
         private StringBuilder buffer = new StringBuilder();
         private string currentRoomId;
 
-        // ĐÃ THÊM: Thuộc tính lưu trữ UserId hiện tại (Cần được gán sau khi login thành công)
+        // Thuộc tính lưu trữ UserId hiện tại (Cần được gán sau khi login thành công)
         public int CurrentUserId { get; set; }
 
         public bool ConnectAndJoinRoomViaMaster(string masterIp, int masterPort, string roomId)
@@ -75,7 +75,7 @@ namespace DrawClient
                 receiveThread.IsBackground = true;
                 receiveThread.Start();
 
-                // ĐÃ SỬA: Gửi kèm UserId thực tế
+                // Gửi kèm UserId thực tế
                 currentRoomId = roomId;
                 Send(new DrawMessage
                 {
@@ -119,7 +119,7 @@ namespace DrawClient
             if (client == null || !client.Connected) return;
 
             currentRoomId = roomId;
-            // ĐÃ SỬA: Gửi kèm UserId khi Join qua danh sách
+            // Gửi kèm UserId khi Join qua danh sách
             Send(new DrawMessage
             {
                 type = "JOIN",

@@ -17,7 +17,7 @@ namespace DrawServer
         private ConcurrentDictionary<string, ConcurrentDictionary<TcpClient, byte>> rooms
             = new ConcurrentDictionary<string, ConcurrentDictionary<TcpClient, byte>>();
 
-        // ĐÃ THÊM: Quản lý thông tin User trên mỗi Connection để biết ai vừa thoát
+        // Quản lý thông tin User trên mỗi Connection để biết ai vừa thoát
         private ConcurrentDictionary<TcpClient, (int UserId, string RoomId)> clientMetadata
             = new ConcurrentDictionary<TcpClient, (int UserId, string RoomId)>();
 
@@ -85,7 +85,7 @@ namespace DrawServer
             catch { }
             finally
             {
-                // ĐÃ SỬA: Khi ngắt kết nối, lấy thông tin để báo cho Master Server
+                // Khi ngắt kết nối, lấy thông tin để báo cho Master Server
                 if (clientMetadata.TryRemove(client, out var metadata))
                 {
                     Console.WriteLine($"User {metadata.UserId} đã rời phòng {metadata.RoomId}. Đang cập nhật Database...");
@@ -111,7 +111,7 @@ namespace DrawServer
                     var room = rooms.GetOrAdd(msg.roomId, _ => new ConcurrentDictionary<TcpClient, byte>());
                     room[client] = 0; // Thêm client vào phòng
 
-                    // ĐÃ THÊM: Lưu lại Metadata để xử lý khi thoát
+                    // Lưu lại Metadata để xử lý khi thoát
                     // Lưu ý: Client cần gửi kèm userId trong gói tin JOIN
                     clientMetadata[client] = (msg.userId, msg.roomId);
 
@@ -127,7 +127,7 @@ namespace DrawServer
                 }
                 else if (msg.type == "LEAVE")
                 {
-                    // ĐÃ THÊM: Xử lý cập nhật DB khi nhận lệnh LEAVE chủ động
+                    // Xử lý cập nhật DB khi nhận lệnh LEAVE chủ động
                     if (clientMetadata.TryRemove(client, out var metadata))
                     {
                         _ = NotifyMasterStatusChanged(metadata.UserId, int.Parse(metadata.RoomId), false);
@@ -138,7 +138,7 @@ namespace DrawServer
             catch (Exception ex) { Console.WriteLine("Lỗi xử lý JSON: " + ex.Message); }
         }
 
-        // ĐÃ THÊM: Hàm gọi API báo cho Master Server cập nhật Database
+        // Hàm gọi API báo cho Master Server cập nhật Database
         private async Task NotifyMasterStatusChanged(int userId, int roomId, bool isOnline)
         {
             try

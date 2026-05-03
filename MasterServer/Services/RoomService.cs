@@ -14,7 +14,7 @@ public class RoomService
         _db = db;
     }
 
-    // 1. ĐÃ THÊM: Hàm cập nhật trạng thái để sửa lỗi Build CS1061
+    // 1. Hàm cập nhật trạng thái 
     public void UpdateUserStatus(int userId, int roomId, int isOnline)
     {
         using var conn = _db.GetConnection();

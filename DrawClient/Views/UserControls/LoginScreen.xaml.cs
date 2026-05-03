@@ -92,10 +92,10 @@ namespace DrawClient.Views
                         {
                             string token = doc.RootElement.GetProperty("token").GetString();
 
-                            // ĐÃ SỬA: LƯU TOKEN VÀO VÍ ĐỂ CÁC MÀN HÌNH KHÁC DÙNG
+                            // LƯU TOKEN VÀO VÍ ĐỂ CÁC MÀN HÌNH KHÁC DÙNG
                             LoginViewModel.Token = token;
 
-                            // ĐÃ THÊM: CHUYỂN MÀN HÌNH SAU KHI ĐĂNG NHẬP THÀNH CÔNG
+                            // CHUYỂN MÀN HÌNH SAU KHI ĐĂNG NHẬP THÀNH CÔNG
                             // Lấy ViewModel đang được gán cho LoginScreen (được gán ở MainWindow)
                             var viewModel = this.DataContext as LoginViewModel;
                             if (viewModel != null && viewModel.GoToLobby != null)
