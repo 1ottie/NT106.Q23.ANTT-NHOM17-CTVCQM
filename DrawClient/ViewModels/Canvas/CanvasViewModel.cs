@@ -5,13 +5,11 @@ using System.Windows.Input;
 using System.Text.Json;
 using System.Windows.Media;
 using DrawClient.Models;
-using System.Security.Policy;
 using System.Windows;
 using System;
 
 namespace DrawClient.ViewModels
 {
-
     public class UserParticipant
     {
         public string Initials { get; set; }
@@ -24,6 +22,7 @@ namespace DrawClient.ViewModels
         public string Message { get; set; }
         public string Time { get; set; }
     }
+
     public class CanvasViewModel : INotifyPropertyChanged
     {
         private string _roomName;
@@ -33,26 +32,37 @@ namespace DrawClient.ViewModels
             set { _roomName = value; OnPropertyChanged(); }
         }
 
+        private string _roomId;
+        public string RoomId
+        {
+            get => _roomId;
+            set { _roomId = value; OnPropertyChanged(); }
+        }
+
+        private string _roomPassword;
+        public string RoomPassword
+        {
+            get => _roomPassword;
+            set { _roomPassword = value; OnPropertyChanged(); }
+        }
+
         private void InitSocketListener()
         {
             ClientSocket.Instance.OnMessageReceived += (msg) =>
             {
                 try
                 {
-                    var draw = JsonSerializer.Deserialize<DrawMessage>(msg);
+                    // ĐÃ SỬA: Thêm options để bỏ qua các trường không tồn tại trong DrawMessage của Client
+                    var options = new JsonSerializerOptions { PropertyNameCaseInsensitive = true };
+                    var draw = JsonSerializer.Deserialize<DrawMessage>(msg, options);
                     if (draw == null) return;
-        
+
                     if (draw.type == "DRAW")
                     {
                         var p1 = new Point(draw.x1, draw.y1);
                         var p2 = new Point(draw.x2, draw.y2);
-        
-                        OnLineReceived?.Invoke(
-                            p1,
-                            p2,
-                            draw.color,
-                            draw.thickness
-                        );
+
+                        OnLineReceived?.Invoke(p1, p2, draw.color, draw.thickness);
                     }
                 }
                 catch (Exception ex)
@@ -62,37 +72,19 @@ namespace DrawClient.ViewModels
             };
         }
 
-        private string _roomId;
         public ICommand LeaveRoomCommand { get; }
+        public ICommand ShowRoomInfoCommand { get; }
         public Action GoBackToLobby { get; set; }
 
-        // Danh sách dữ liệu
         public ObservableCollection<UserParticipant> Users { get; set; }
         public ObservableCollection<string> NetworkLogs { get; set; }
         public ObservableCollection<ChatMessage> ChatMessages { get; set; }
-
-        // Các State quản lý Giao diện
-
 
         private bool _isSidebarOpen = true;
         public bool IsSidebarOpen
         {
             get => _isSidebarOpen;
             set { _isSidebarOpen = value; OnPropertyChanged(); }
-        }
-
-        private int _playbackProgress = 0;
-        public int PlaybackProgress
-        {
-            get => _playbackProgress;
-            set { _playbackProgress = value; OnPropertyChanged(); }
-        }
-
-        private string _activeTool = "Pen";
-        public string ActiveTool
-        {
-            get => _activeTool;
-            set { _activeTool = value; OnPropertyChanged(); }
         }
 
         private string _currentColor = "#000000";
@@ -110,45 +102,39 @@ namespace DrawClient.ViewModels
         }
 
         public event Action<Point, Point, string, double> OnLineReceived;
-        public CanvasViewModel(string roomName, string roomId)
+
+        public CanvasViewModel(string roomName, string roomId, string password = "")
         {
             RoomName = roomName;
-            _roomId = roomId;
+            RoomId = roomId;
+            RoomPassword = string.IsNullOrEmpty(password) ? "Không có mật khẩu" : password;
 
             InitSocketListener();
-            
-            LeaveRoomCommand = new RelayCommand(ExecuteLeaveRoom);
 
-            // Mock Data
+            LeaveRoomCommand = new RelayCommand(ExecuteLeaveRoom);
+            ShowRoomInfoCommand = new RelayCommand(ExecuteShowRoomInfo);
+
             Users = new ObservableCollection<UserParticipant>
             {
-                new UserParticipant { Initials = "SC", ColorHex = "#1A73E8" },
-                new UserParticipant { Initials = "MJ", ColorHex = "#34A853" },
-                new UserParticipant { Initials = "ED", ColorHex = "#FBBC04" }
+                new UserParticipant { Initials = "JD", ColorHex = "#1A73E8" }
             };
 
             NetworkLogs = new ObservableCollection<string>
             {
-                "14:23:45 → Encrypted packet sent",
-                "14:23:46 ← Sync received from client 2",
-                "14:23:48 ← User 'Mike' joined"
+                $"Joined Room: {roomName}",
+                $"ID: {roomId}",
+                $"Password: {RoomPassword}"
             };
 
-            ChatMessages = new ObservableCollection<ChatMessage>
-            {
-                new ChatMessage { User = "Sarah Chen", Message = "alooo", Time = "14:20" },
-                new ChatMessage { User = "Mike Johnson", Message = "aaalo", Time = "14:21" }
-            };
+            ChatMessages = new ObservableCollection<ChatMessage>();
         }
-
-        // Logic gửi dữ liệu lên mạng
 
         public void SendDrawData(Point p1, Point p2)
         {
             var msg = new DrawMessage
             {
                 type = "DRAW",
-                roomId = "room1", // Tạm fix cứng, sau này lấy từ thông tin phòng
+                roomId = this.RoomId,
                 x1 = p1.X,
                 y1 = p1.Y,
                 x2 = p2.X,
@@ -156,13 +142,17 @@ namespace DrawClient.ViewModels
                 color = this.CurrentColor,
                 thickness = this.CurrentThickness
             };
-
             ClientSocket.Instance.Send(msg);
+        }
+
+        private void ExecuteShowRoomInfo(object obj)
+        {
+            MessageBox.Show($"Room ID: {RoomId}\nPassword: {RoomPassword}", "Thông tin phòng", MessageBoxButton.OK, MessageBoxImage.Information);
         }
 
         private void ExecuteLeaveRoom(object obj)
         {
-            var leaveMsg = new DrawMessage { type = "LEAVE", roomId = _roomId };
+            var leaveMsg = new DrawMessage { type = "LEAVE", roomId = RoomId };
             ClientSocket.Instance.Send(leaveMsg);
             GoBackToLobby?.Invoke();
         }

@@ -17,7 +17,7 @@ namespace DrawClient.ViewModels
         {
             // Khi app vừa chạy lên, mở màn hình Login đầu tiên
             //NavigateToLogin();
-            NavigateToCanvas("room_test_123", "Canvas test");
+            NavigateToLogin();
         }
 
         // Các hàm điều hướng
@@ -35,9 +35,10 @@ namespace DrawClient.ViewModels
             CurrentView = lobbyVM;
         }
 
-        private void NavigateToCanvas(string roomId, string roomName)
+        private void NavigateToCanvas(string roomId, string roomName, string password)
         {
-            var canvasVM = new CanvasViewModel(roomName, roomId);
+            // Truyền thêm 'password' vào trong CanvasViewModel
+            var canvasVM = new CanvasViewModel(roomName, roomId, password);
             canvasVM.GoBackToLobby = NavigateToLobby;
             CurrentView = canvasVM;
         }

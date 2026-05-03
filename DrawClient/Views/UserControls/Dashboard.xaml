@@ -65,14 +65,62 @@
 
             <ScrollViewer Grid.Column="0" Padding="32" VerticalScrollBarVisibility="Auto">
                 <StackPanel>
-                    <Button Content="+ New Room" Command="{Binding JoinRoomCommand}" 
-                            Background="#1A73E8" Foreground="White" FontSize="14" FontWeight="Medium" Padding="24,10" HorizontalAlignment="Left" BorderThickness="0" Margin="0,0,0,24">
-                        <Button.Resources>
-                            <Style TargetType="Border">
-                                <Setter Property="CornerRadius" Value="24"/>
-                            </Style>
-                        </Button.Resources>
-                    </Button>
+                    <!-- THAY THẾ NÚT "+ NEW ROOM" BẰNG KHỐI NÀY -->
+                    <Grid Margin="0,0,0,24">
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="*"/>
+                            <ColumnDefinition Width="24"/>
+                            <ColumnDefinition Width="*"/>
+                        </Grid.ColumnDefinitions>
+
+                        <!-- KHU VỰC TẠO PHÒNG MỚI -->
+                        <Border Grid.Column="0" Background="#FFFFFF" BorderBrush="#DADCE0" BorderThickness="1" CornerRadius="8" Padding="20">
+                            <StackPanel>
+                                <TextBlock Text="Create New Room" FontSize="16" FontWeight="Medium" Foreground="#202124" Margin="0,0,0,16"/>
+
+                                <TextBlock Text="Room Name" Foreground="#5F6368" FontSize="12" Margin="0,0,0,4"/>
+                                <TextBox Text="{Binding NewRoomName, UpdateSourceTrigger=PropertyChanged}" Height="36" Padding="8,0" BorderBrush="#DADCE0" VerticalContentAlignment="Center" Margin="0,0,0,12"/>
+
+                                <TextBlock Text="Password (Optional)" Foreground="#5F6368" FontSize="12" Margin="0,0,0,4"/>
+                                <TextBox Text="{Binding NewRoomPassword, UpdateSourceTrigger=PropertyChanged}" Height="36" Padding="8,0" BorderBrush="#DADCE0" VerticalContentAlignment="Center" Margin="0,0,0,12"/>
+
+                                <CheckBox Content="Private Room" IsChecked="{Binding NewRoomIsPrivate}" Foreground="#5F6368" Margin="0,0,0,16"/>
+
+                                <Button Content="Create Room" Command="{Binding CreateRoomCommand}" 
+                    Background="#1A73E8" Foreground="White" FontSize="14" FontWeight="Medium" Height="36" BorderThickness="0">
+                                    <Button.Resources>
+                                        <Style TargetType="Border">
+                                            <Setter Property="CornerRadius" Value="4"/>
+                                        </Style>
+                                    </Button.Resources>
+                                </Button>
+                            </StackPanel>
+                        </Border>
+
+                        <!-- KHU VỰC VÀO PHÒNG BẰNG ID & MẬT KHẨU -->
+                        <Border Grid.Column="2" Background="#FFFFFF" BorderBrush="#DADCE0" BorderThickness="1" CornerRadius="8" Padding="20">
+                            <StackPanel>
+                                <TextBlock Text="Join Room via ID" FontSize="16" FontWeight="Medium" Foreground="#202124" Margin="0,0,0,16"/>
+
+                                <TextBlock Text="Room ID" Foreground="#5F6368" FontSize="12" Margin="0,0,0,4"/>
+                                <TextBox Text="{Binding JoinRoomIdStr, UpdateSourceTrigger=PropertyChanged}" Height="36" Padding="8,0" BorderBrush="#DADCE0" VerticalContentAlignment="Center" Margin="0,0,0,12"/>
+
+                                <TextBlock Text="Password" Foreground="#5F6368" FontSize="12" Margin="0,0,0,4"/>
+                                <TextBox Text="{Binding JoinRoomPassword, UpdateSourceTrigger=PropertyChanged}" Height="36" Padding="8,0" BorderBrush="#DADCE0" VerticalContentAlignment="Center" Margin="0,0,0,33"/>
+                                <!-- Margin 33 để căn ngang với ô Create -->
+
+                                <Button Content="Join Room" Command="{Binding JoinManualCommand}" 
+                    Background="#34A853" Foreground="White" FontSize="14" FontWeight="Medium" Height="36" BorderThickness="0">
+                                    <Button.Resources>
+                                        <Style TargetType="Border">
+                                            <Setter Property="CornerRadius" Value="4"/>
+                                        </Style>
+                                    </Button.Resources>
+                                </Button>
+                            </StackPanel>
+                        </Border>
+                    </Grid>
+                    <!-- KẾT THÚC PHẦN THAY THẾ -->
 
                     <TextBlock Text="ACTIVE ROOMS" FontSize="14" FontWeight="Medium" Foreground="#5F6368" Margin="0,0,0,16"/>
 
