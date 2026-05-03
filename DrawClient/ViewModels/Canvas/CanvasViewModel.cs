@@ -52,7 +52,7 @@ namespace DrawClient.ViewModels
             {
                 try
                 {
-                    // ĐÃ SỬA: Thêm options để bỏ qua các trường không tồn tại trong DrawMessage của Client
+                    // Thêm options để bỏ qua các trường không tồn tại trong DrawMessage của Client
                     var options = new JsonSerializerOptions { PropertyNameCaseInsensitive = true };
                     var draw = JsonSerializer.Deserialize<DrawMessage>(msg, options);
                     if (draw == null) return;

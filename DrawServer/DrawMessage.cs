@@ -5,7 +5,7 @@
         // Loại tin nhắn: "JOIN", "DRAW", "LEAVE", "CHAT"
         public string type { get; set; }
         public string roomId { get; set; }
-        public int userId { get; set; } // ĐÃ THÊM: ID của người dùng để Node Server xử lý
+        public int userId { get; set; } // ID của người dùng để Node Server xử lý
 
         // Dữ liệu vẽ
         public double x1 { get; set; }

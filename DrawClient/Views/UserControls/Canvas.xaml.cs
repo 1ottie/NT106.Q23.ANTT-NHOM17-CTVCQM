@@ -51,7 +51,7 @@ namespace DrawClient.Views.UserControls
 
             Point currentPoint = e.GetPosition(MyCanvas);
 
-            // ĐÃ SỬA: Gọi hàm DrawLineLocal để vẽ nội bộ vì InkCanvas đã bị đặt thành EditingMode="None"
+            // Gọi hàm DrawLineLocal để vẽ nội bộ vì InkCanvas đã bị đặt thành EditingMode="None"
             DrawLineLocal(lastPoint, currentPoint, _viewModel.CurrentColor, _viewModel.CurrentThickness);
 
             // Gửi dữ liệu qua mạng cho người khác
