@@ -155,7 +155,7 @@ namespace DrawClient.ViewModels
                         createdRoomId = doc.RootElement.GetProperty("room_id").GetInt32();
                     }
 
-                    // ĐÃ SỬA: Gọi JoinApi luôn để tự động kết nối TCP và nhảy thẳng vào phòng
+                    // Gọi JoinApi luôn để tự động kết nối TCP và nhảy thẳng vào phòng
                     await CallJoinApi(createdRoomId, newRoomReq.password);
 
                     await LoadRooms();
@@ -219,11 +219,21 @@ namespace DrawClient.ViewModels
                     var options = new JsonSerializerOptions { PropertyNameCaseInsensitive = true };
                     var result = JsonSerializer.Deserialize<Room>(jsonResponse, options);
 
+                    // Trước khi kết nối TCP, gán UserId vào ClientSocket để nó gửi đi
+                    ClientSocket.Instance.CurrentUserId = LoginViewModel.CurrentUserId;
+
                     bool connected = ClientSocket.Instance.Connect(result.node.ip, result.node.port);
                     if (connected)
                     {
-                        ClientSocket.Instance.Send(new { type = "JOIN", roomId = result.Id });
-                        // ĐÃ SỬA: Truyền thêm biến password vào hàm này
+                        // Gói tin JOIN bây giờ gửi kèm cả roomId và userId
+                        ClientSocket.Instance.Send(new
+                        {
+                            type = "JOIN",
+                            roomId = result.Id,
+                            userId = LoginViewModel.CurrentUserId
+                        });
+
+                        // Truyền thêm biến password vào hàm này
                         GoToCanvas?.Invoke(result.Id, result.room_name, password);
                     }
                 }
