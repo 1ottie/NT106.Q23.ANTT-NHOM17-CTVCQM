@@ -309,9 +309,9 @@
                 <Border Grid.Column="2" Width="32" Height="32" Background="#1A73E8" CornerRadius="16">
                     <TextBlock Text="JD" Foreground="White" FontSize="14" FontWeight="Medium" HorizontalAlignment="Center" VerticalAlignment="Center"/>
                 </Border>
-                
+
             </Grid>
-            
+
         </Border>
 
         <Grid Grid.Row="1">
@@ -789,8 +789,8 @@
             </Border>
         </Grid>
         <!-- ================= OCR TOAST NOTIFICATION ================= -->
-        <Border HorizontalAlignment="Center" VerticalAlignment="Top" 
-                Margin="0,619,0,0" Padding="24,12" MinWidth="220" 
+        <Border HorizontalAlignment="Center" VerticalAlignment="Bottom" 
+                Margin="0,0,0,40" Padding="24,12" MinWidth="220" 
                 Background="#202124" CornerRadius="22" Panel.ZIndex="999"
                 Visibility="{Binding IsOcrToastVisible, Converter={StaticResource BoolToVis}}"
                 d:Visibility="Visible" Grid.Row="1" Width="284" Height="53">
@@ -802,6 +802,56 @@
             <TextBlock Text="Draw words to detect text" 
                                Foreground="#FFFFFF" FontSize="14" 
                                HorizontalAlignment="Left" VerticalAlignment="Center" Margin="4,0,0,0"/>
+        </Border>
+        <!-- ================= POPOVER PROFILE / LOG OUT ================= -->
+        <Border x:Name="ProfilePopover"
+                Background="#FFFFFF" CornerRadius="8" MinWidth="160"
+                HorizontalAlignment="Right" VerticalAlignment="Top" 
+                Margin="0,52,24,0" Padding="0"
+            Panel.ZIndex="1000"
+                Visibility="{Binding IsProfilePopoverVisible, Converter={StaticResource BoolToVis}}"
+                d:Visibility="Visible" Grid.RowSpan="2" Height="50" Width="180">
+
+            <Border.Effect>
+                <DropShadowEffect BlurRadius="8" ShadowDepth="2" Opacity="0.15" Color="#3C4043"/>
+            </Border.Effect>
+
+            <StackPanel>
+                <Button Command="{Binding LogoutCommand}" Background="Transparent" BorderThickness="0" Cursor="Hand" HorizontalContentAlignment="Stretch" Height="50">
+                    <Button.Template>
+                        <ControlTemplate TargetType="Button">
+                            <Border x:Name="bgBorder" Background="{TemplateBinding Background}" Padding="16,12" CornerRadius="8" SnapsToDevicePixels="True">
+                                <Grid>
+                                    <Grid.ColumnDefinitions>
+                                        <ColumnDefinition Width="36"/>
+                                        <ColumnDefinition Width="*"/>
+                                    </Grid.ColumnDefinitions>
+
+                                    <Path Grid.Column="0" 
+                                          Data="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4 M16 17l5-5-5-5 M21 12H9" 
+                                          Stroke="#5F6368" StrokeThickness="1.5" 
+                                          StrokeStartLineCap="Round" StrokeEndLineCap="Round" StrokeLineJoin="Round"
+                                          Fill="Transparent" 
+                                          Width="18" Height="18" Stretch="Uniform" Margin="9,4,9,4"/>
+
+                                    <TextBlock Grid.Column="1" 
+                                               Text="Log out" 
+                                               FontSize="14" 
+                                               FontWeight="Regular"
+                                               Foreground="#202124" Margin="10,0,0,0"
+                                               VerticalAlignment="Center"/>
+                                </Grid>
+                            </Border>
+
+                            <ControlTemplate.Triggers>
+                                <Trigger Property="IsMouseOver" Value="True">
+                                    <Setter TargetName="bgBorder" Property="Background" Value="#F8F9FA"/>
+                                </Trigger>
+                            </ControlTemplate.Triggers>
+                        </ControlTemplate>
+                    </Button.Template>
+                </Button>
+            </StackPanel>
         </Border>
     </Grid>
 </UserControl>
