@@ -3,51 +3,42 @@
              xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
              xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006" 
              xmlns:d="http://schemas.microsoft.com/expression/blend/2008" 
-             xmlns:local="clr-namespace:DrawClient.Views"
-                          mc:Ignorable="d" 
+             mc:Ignorable="d" 
              d:DesignHeight="768" d:DesignWidth="1024">
     <Grid Background="#F0F4F9">
         <Border Background="#FFFFFF" 
-        Width="450" 
-        VerticalAlignment="Center" 
-        HorizontalAlignment="Center" 
-        CornerRadius="8" 
-        Padding="48">
+                Width="450" 
+                VerticalAlignment="Center" 
+                HorizontalAlignment="Center" 
+                CornerRadius="8" 
+                Padding="48">
 
             <Border.Effect>
                 <DropShadowEffect BlurRadius="10" ShadowDepth="2" Color="Gray" Opacity="0.2"/>
             </Border.Effect>
 
             <StackPanel>
-
                 <Ellipse Width="80" Height="80" Fill="#E8F0FE" HorizontalAlignment="Center" Margin="0,0,0,20"/>
 
-                <TextBlock Text="Sign in to CollabDraw" 
-                   FontSize="24" 
-                   Foreground="#202124" 
-                   HorizontalAlignment="Center" 
-                   Margin="0,0,0,30" />
+                <TextBlock x:Name="txtTitle" Text="Sign in to CollabDraw" 
+                           FontSize="24" Foreground="#202124" HorizontalAlignment="Center" Margin="0,0,0,30" />
+
+                <!-- Thông báo lỗi / thành công -->
+                <TextBlock x:Name="txtMessage" Foreground="Red" TextWrapping="Wrap" Margin="0,0,0,10" HorizontalAlignment="Center" Visibility="Collapsed"/>
 
                 <TextBlock Text="Username" Foreground="#5F6368" Margin="0,0,0,5"/>
                 <TextBox x:Name="txtUsername" Height="40" Margin="0,0,0,20" Padding="5" BorderBrush="#DADCE0" VerticalContentAlignment="Center"/>
 
-                <TextBlock Text="Server IP" Foreground="#5F6368" Margin="0,0,0,5" />
-                <TextBox x:Name="txtIP" Height="40" Margin="0,0,0,20" Padding="5" BorderBrush="#DADCE0" VerticalContentAlignment="Center"/>
+                <TextBlock Text="Password" Foreground="#5F6368" Margin="0,0,0,5"/>
+                <PasswordBox x:Name="txtPassword" Height="40" Margin="0,0,0,20" Padding="5" BorderBrush="#DADCE0" VerticalContentAlignment="Center"/>
 
-                <TextBlock Text="Port" Foreground="#5F6368" Margin="0,0,0,5"/>
-                <TextBox x:Name="txtPort" Height="40" Margin="0,0,0,20" Padding="5" BorderBrush="#DADCE0" VerticalContentAlignment="Center"/>
+                <!-- Trường Email chỉ hiện khi Đăng ký -->
+                <TextBlock x:Name="lblEmail" Text="Email" Foreground="#5F6368" Margin="0,0,0,5" Visibility="Collapsed"/>
+                <TextBox x:Name="txtEmail" Height="40" Margin="0,0,0,20" Padding="5" BorderBrush="#DADCE0" VerticalContentAlignment="Center" Visibility="Collapsed"/>
 
-                <CheckBox Content="Enable Hybrid Security" 
-                  Foreground="#5F6368" 
-                  Margin="0,0,0,30"/>
-
-                <Button Content="Connect" Command="{Binding ConnectCommand}"
-                Height="45" 
-                Background="#1A73E8" 
-                Foreground="White" 
-                FontSize="14" 
-                FontWeight="SemiBold"
-                BorderThickness="0" Click="Button_Click">
+                <Button x:Name="btnSubmit" Content="Login" 
+                        Height="45" Background="#1A73E8" Foreground="White" FontSize="14" FontWeight="SemiBold"
+                        BorderThickness="0" Click="Button_Click" Margin="0,10,0,0">
                     <Button.Resources>
                         <Style TargetType="Border">
                             <Setter Property="CornerRadius" Value="4"/>
@@ -55,8 +46,14 @@
                     </Button.Resources>
                 </Button>
 
+                <!-- Nút chuyển đổi Đăng nhập / Đăng ký -->
+                <TextBlock HorizontalAlignment="Center" Margin="0,20,0,0" Foreground="#1A73E8">
+                    <Hyperlink Click="ToggleMode_Click" TextDecorations="None">
+                        <Run x:Name="txtToggleMode" Text="Don't have an account? Register" />
+                    </Hyperlink>
+                </TextBlock>
+
             </StackPanel>
         </Border>
     </Grid>
 </UserControl>
-

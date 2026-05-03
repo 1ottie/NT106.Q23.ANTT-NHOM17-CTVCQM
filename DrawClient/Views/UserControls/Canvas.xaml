@@ -69,7 +69,17 @@
                     </Button>
 
                     <Rectangle Width="1" Height="24" Margin="0,0,5,0"/>
-                    <TextBlock Text="{Binding RoomName}" FontSize="16" FontWeight="SemiBold" Foreground="#202124" VerticalAlignment="Center" Margin="0,0,20,0" RenderTransformOrigin="0.664,0.608"/>
+
+                    <Button Command="{Binding ShowRoomInfoCommand}" Background="Transparent" BorderThickness="0" Cursor="Hand" Margin="0,0,20,0">
+                        <Button.ToolTip>
+                            <ToolTip Content="Nhấp để xem Mã phòng và Mật khẩu"/>
+                        </Button.ToolTip>
+                        <Button.Template>
+                            <ControlTemplate TargetType="Button">
+                                <TextBlock Text="{Binding RoomName}" FontSize="16" FontWeight="SemiBold" Foreground="#202124" VerticalAlignment="Center" RenderTransformOrigin="0.664,0.608"/>
+                            </ControlTemplate>
+                        </Button.Template>
+                    </Button>
 
                     <Rectangle Width="1" Height="24" Fill="#E8EAED" Margin="0,0,16,0"/>
 
@@ -172,8 +182,12 @@
 
             <Grid Grid.Column="0" ClipToBounds="True">
 
-                <InkCanvas x:Name="MyCanvas" Panel.ZIndex="1"
-                           MouseDown="Canvas_MouseDown" MouseMove="Canvas_MouseMove" MouseUp="Canvas_MouseUp">
+                <!-- ĐÃ SỬA: Thay đổi cấu hình sự kiện và vô hiệu hóa chế độ vẽ nội bộ của InkCanvas -->
+                <InkCanvas x:Name="MyCanvas" Grid.Column="0" 
+                           EditingMode="None"
+                           MouseDown="Canvas_MouseDown" 
+                           MouseUp="Canvas_MouseUp" 
+                           MouseMove="Canvas_MouseMove">
                     <InkCanvas.Background>
                         <DrawingBrush Viewport="0,0,30,30" ViewportUnits="Absolute" TileMode="Tile" Stretch="None">
                             <DrawingBrush.Drawing>
