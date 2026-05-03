@@ -33,6 +33,35 @@ namespace DrawClient.ViewModels
             set { _roomName = value; OnPropertyChanged(); }
         }
 
+        private void InitSocketListener()
+        {
+            ClientSocket.Instance.OnMessageReceived += (msg) =>
+            {
+                try
+                {
+                    var draw = JsonSerializer.Deserialize<DrawMessage>(msg);
+                    if (draw == null) return;
+        
+                    if (draw.type == "DRAW")
+                    {
+                        var p1 = new Point(draw.x1, draw.y1);
+                        var p2 = new Point(draw.x2, draw.y2);
+        
+                        OnLineReceived?.Invoke(
+                            p1,
+                            p2,
+                            draw.color,
+                            draw.thickness
+                        );
+                    }
+                }
+                catch (Exception ex)
+                {
+                    Console.WriteLine("Parse error: " + ex.Message);
+                }
+            };
+        }
+
         private string _roomId;
         public ICommand LeaveRoomCommand { get; }
         public Action GoBackToLobby { get; set; }
@@ -86,6 +115,8 @@ namespace DrawClient.ViewModels
             RoomName = roomName;
             _roomId = roomId;
 
+            InitSocketListener();
+            
             LeaveRoomCommand = new RelayCommand(ExecuteLeaveRoom);
 
             // Mock Data
