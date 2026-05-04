@@ -87,6 +87,8 @@
       <SubType>Designer</SubType>
     </ApplicationDefinition>
     <Compile Include="Models\DrawMessage.cs" />
+    <Compile Include="Models\MasterRequest.cs" />
+    <Compile Include="Models\MasterResponse.cs" />
     <Compile Include="Models\RelayCommand.cs" />
     <Compile Include="Models\Room.cs" />
     <Compile Include="Models\ServerConfig .cs" />

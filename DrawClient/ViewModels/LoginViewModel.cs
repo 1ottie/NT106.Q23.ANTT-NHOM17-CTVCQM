@@ -1,5 +1,4 @@
 ﻿using System;
-using System.Windows;
 using System.Windows.Input;
 
 namespace DrawClient.ViewModels
@@ -13,6 +12,16 @@ namespace DrawClient.ViewModels
         public ICommand ConnectCommand { get; }
         public Action GoToLobby { get; set; }
 
+        // Thêm 2 biến static này để truyền IP/Port của Master sang cho LobbyViewModel
+        public static string CurrentMasterIp { get; set; } = "127.0.0.1";
+        public static int CurrentMasterPort { get; set; } = 5000;
+
+        // Lưu trữ UserId để các ViewModel khác và Socket có thể sử dụng
+        public static int CurrentUserId { get; set; }
+
+        // lưu token
+        public static string Token { get; set; }
+
         public LoginViewModel()
         {
             ConnectCommand = new RelayCommand(ExecuteConnect);
@@ -23,20 +32,18 @@ namespace DrawClient.ViewModels
 
         private void ExecuteConnect(object obj)
         {
-            int portNum = int.Parse(Port);
+            // Lưu lại IP và Port của Master Server
+            CurrentMasterIp = ServerIp;
+            CurrentMasterPort = int.Parse(Port);
 
-            bool isConnected = ClientSocket.Instance.Connect(ServerIp, portNum);
+            // GHI CHÚ: Trong logic đăng nhập thực tế của bạn, sau khi nhận Token từ API,
+            // bạn hãy gán: CurrentUserId = [ID nhận được từ API];
+            // Ví dụ tạm thời để test:
+            CurrentUserId = 8;
 
-            if (isConnected)
-            {
-                MessageBox.Show("Kết nối thành công tới " + ServerIp);
-                GoToLobby?.Invoke();
-            }
-            else
-            {
-                MessageBox.Show("Kết nối thất bại!");
-            }
-
+            // Bỏ qua kết nối TCP lúc này. Chỉ cần chuyển sang Lobby. 
+            // Việc kết nối mạng thực sự sẽ diễn ra khi người dùng chọn phòng.
+            GoToLobby?.Invoke();
         }
     }
 }
