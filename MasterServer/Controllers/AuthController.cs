@@ -1,4 +1,4 @@
-using Microsoft.AspNetCore.Mvc;
+﻿using Microsoft.AspNetCore.Mvc;
 
 [ApiController]
 [Route("api/auth")]
@@ -40,5 +40,19 @@ public class AuthController : ControllerBase
                 user.email
             }
         });
+    }
+    [HttpGet("test-db")]
+    public IActionResult TestDb([FromServices] DbConnection dbConfig)
+    {
+        try
+        {
+            using var conn = dbConfig.GetConnection();
+            conn.Open(); // Thực hiện kết nối
+            return Ok(new { message = "Kết nối Database thành công!", status = "OK" });
+        }
+        catch (Exception ex)
+        {
+            return StatusCode(500, new { message = "Lỗi kết nối DB", error = ex.Message });
+        }
     }
 }
