@@ -13,5 +13,3 @@ Release/
 
 # Logs
 *.log
-/DrawClient/Views/UserControls/Dashboard.xaml
-/DrawClient/Views/UserControls/Canvas.xaml
