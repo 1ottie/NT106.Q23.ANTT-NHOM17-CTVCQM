@@ -1,10 +1,14 @@
-﻿namespace DrawServer
+﻿using System.Text.Json.Serialization;
+
+namespace DrawServer
 {
     public class DrawMessage
     {
         // Loại tin nhắn: "JOIN", "DRAW", "LEAVE", "CHAT"
         public string type { get; set; }
         public string roomId { get; set; }
+
+        [JsonPropertyName("userId")]
         public int userId { get; set; } // ID của người dùng để Node Server xử lý
 
         // Dữ liệu vẽ

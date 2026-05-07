@@ -5,8 +5,13 @@
              xmlns:d="http://schemas.microsoft.com/expression/blend/2008" 
              xmlns:local="clr-namespace:DrawClient.Views"
              mc:Ignorable="d" d:DesignHeight="768" d:DesignWidth="1024"
-             Background="#FFFFFF">
-
+             Background="#FFFFFF"
+             xmlns:conv="clr-namespace:DrawClient.Converters">
+    <UserControl.Resources>
+        <conv:BoolToVisibilityConverter
+        x:Key="BoolToVis"/>
+    </UserControl.Resources>
+    
     <Grid>
         <Grid.RowDefinitions>
             <RowDefinition Height="Auto"/>

@@ -71,9 +71,21 @@ namespace DrawClient.ViewModels
         // ------------------------------------------
 
         public ICommand JoinRoomCommand { get; }
+        public ICommand LogoutCommand { get; }
         public ICommand JoinManualCommand { get; }
         public ICommand CreateRoomCommand { get; }
         public ICommand RefreshCommand { get; }
+
+        private bool _isProfilePopoverVisible;
+        public bool IsProfilePopoverVisible
+        {
+            get => _isProfilePopoverVisible;
+            set
+            {
+                _isProfilePopoverVisible = value;
+                OnPropertyChanged();
+            }
+        }
 
         // ĐÃ SỬA: Thêm tham số thứ 3 (string password) vào Action để truyền sang Canvas
         public Action<string, string, string> GoToCanvas { get; set; }
@@ -85,6 +97,7 @@ namespace DrawClient.ViewModels
             JoinManualCommand = new RelayCommand(ExecuteJoinRoomManual);
             CreateRoomCommand = new RelayCommand(async (obj) => await ExecuteCreateRoom());
             RefreshCommand = new RelayCommand(async (obj) => await LoadRooms());
+            LogoutCommand = new RelayCommand(ExecuteLogout);
 
             // Load danh sách phòng ngay khi mở App
             _ = LoadRooms();
@@ -219,18 +232,32 @@ namespace DrawClient.ViewModels
                     var options = new JsonSerializerOptions { PropertyNameCaseInsensitive = true };
                     var result = JsonSerializer.Deserialize<Room>(jsonResponse, options);
 
-                    // Trước khi kết nối TCP, gán UserId vào ClientSocket để nó gửi đi
+                    System.Diagnostics.Debug.WriteLine(
+                        "[LOGIN STATIC USER ID] = "
+                        + LoginViewModel.CurrentUserId);
+
+                    System.Diagnostics.Debug.WriteLine(
+                        "[SOCKET USER ID BEFORE] = "
+                        + ClientSocket.Instance.CurrentUserId);
+                    
                     ClientSocket.Instance.CurrentUserId = LoginViewModel.CurrentUserId;
+
+                    System.Diagnostics.Debug.WriteLine(
+                        "[SOCKET USER ID AFTER] = "
+                        + ClientSocket.Instance.CurrentUserId);
 
                     bool connected = ClientSocket.Instance.Connect(result.node.ip, result.node.port);
                     if (connected)
                     {
+                        System.Diagnostics.Debug.WriteLine(
+                            "[BEFORE SEND JOIN] USER ID = "
+                            + ClientSocket.Instance.CurrentUserId);
                         // Gói tin JOIN bây giờ gửi kèm cả roomId và userId
                         ClientSocket.Instance.Send(new
                         {
                             type = "JOIN",
                             roomId = result.Id,
-                            userId = LoginViewModel.CurrentUserId
+                            userId = ClientSocket.Instance.CurrentUserId
                         });
 
                         // Truyền thêm biến password vào hàm này
@@ -247,6 +274,10 @@ namespace DrawClient.ViewModels
             {
                 MessageBox.Show("Lỗi hệ thống: " + ex.Message);
             }
+        }
+        private void ExecuteLogout(object obj)
+        {
+            Application.Current.Shutdown();
         }
 
         // --- CÁC HÀM XỬ LÝ SỰ KIỆN GIAO DIỆN  ---

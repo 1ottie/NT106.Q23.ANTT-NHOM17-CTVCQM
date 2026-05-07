@@ -160,11 +160,20 @@ namespace DrawClient
             try
             {
                 if (stream == null || !client.Connected) return;
+
                 string json = JsonSerializer.Serialize(obj);
+
+                Console.WriteLine("[SEND JSON]");
+                Console.WriteLine(json);
+
                 byte[] data = Encoding.UTF8.GetBytes(json + "\n");
+
                 stream.Write(data, 0, data.Length);
             }
-            catch { }
+            catch (Exception ex)
+            {
+                Console.WriteLine(ex.Message);
+            }
         }
         #endregion
 
@@ -173,14 +182,41 @@ namespace DrawClient
         {
             try
             {
-                var options = new JsonSerializerOptions { PropertyNameCaseInsensitive = true };
-                var draw = JsonSerializer.Deserialize<DrawMessage>(msg, options);
-                if (draw != null && !string.IsNullOrEmpty(draw.type))
+                using (JsonDocument doc =
+                    JsonDocument.Parse(msg))
                 {
-                    OnMessageReceived?.Invoke(msg);
+                    string type =
+                        doc.RootElement
+                            .GetProperty("type")
+                            .GetString();
+
+                    // HISTORY packet
+                    if (type == "HISTORY")
+                    {
+                        OnMessageReceived?.Invoke(msg);
+                        return;
+                    }
+
+                    var options =
+                        new JsonSerializerOptions
+                        {
+                            PropertyNameCaseInsensitive = true
+                        };
+
+                    var draw =
+                        JsonSerializer.Deserialize<DrawMessage>(
+                            msg,
+                            options);
+
+                    if (draw != null)
+                    {
+                        OnMessageReceived?.Invoke(msg);
+                    }
                 }
             }
-            catch { }
+            catch
+            {
+            }
         }
         #endregion
     }

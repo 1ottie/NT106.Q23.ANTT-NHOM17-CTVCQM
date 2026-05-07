@@ -1,3 +1,8 @@
+commit save + load db
+* khi chạy nhớ đổi thêm tk MySQL trong ServerSocket.cs
+* tạo converter BoolToVis để debug
+* đã sửa để login bằng api thật
+
 joined room: meme
 room_id: 8
 password: 123456
