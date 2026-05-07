@@ -7,6 +7,7 @@ using System.Windows.Media;
 using DrawClient.Models;
 using System.Windows;
 using System;
+using System.Collections.Generic;
 
 namespace DrawClient.ViewModels
 {
@@ -52,22 +53,76 @@ namespace DrawClient.ViewModels
             {
                 try
                 {
-                    // Thêm options để bỏ qua các trường không tồn tại trong DrawMessage của Client
-                    var options = new JsonSerializerOptions { PropertyNameCaseInsensitive = true };
-                    var draw = JsonSerializer.Deserialize<DrawMessage>(msg, options);
-                    if (draw == null) return;
-
-                    if (draw.type == "DRAW")
+                    using (JsonDocument doc =
+                        JsonDocument.Parse(msg))
                     {
-                        var p1 = new Point(draw.x1, draw.y1);
-                        var p2 = new Point(draw.x2, draw.y2);
+                        string type =
+                            doc.RootElement
+                                .GetProperty("type")
+                                .GetString();
 
-                        OnLineReceived?.Invoke(p1, p2, draw.color, draw.thickness);
+                        // ===== HISTORY =====
+                        if (type == "HISTORY")
+                        {
+                            var history =
+                                JsonSerializer.Deserialize<HistoryMessage>(msg);
+
+                            if (history != null &&
+                                history.actions != null)
+                            {
+                                foreach (var item in history.actions)
+                                {
+                                    var hp1 =
+                                        new Point(item.x1, item.y1);
+
+                                    var hp2 =
+                                        new Point(item.x2, item.y2);
+
+                                    OnLineReceived?.Invoke(
+                                        hp1,
+                                        hp2,
+                                        item.color,
+                                        item.thickness);
+                                }
+                            }
+
+                            return;
+                        }
+
+                        // ===== DRAW =====
+                        var options =
+                            new JsonSerializerOptions
+                            {
+                                PropertyNameCaseInsensitive = true
+                            };
+
+                        var draw =
+                            JsonSerializer.Deserialize<DrawMessage>(
+                                msg,
+                                options);
+
+                        if (draw == null) return;
+
+                        if (draw.type == "DRAW")
+                        {
+                            var p1 =
+                                new Point(draw.x1, draw.y1);
+
+                            var p2 =
+                                new Point(draw.x2, draw.y2);
+
+                            OnLineReceived?.Invoke(
+                                p1,
+                                p2,
+                                draw.color,
+                                draw.thickness);
+                        }
                     }
                 }
                 catch (Exception ex)
                 {
-                    Console.WriteLine("Parse error: " + ex.Message);
+                    Console.WriteLine(
+                        "Parse error: " + ex.Message);
                 }
             };
         }
@@ -135,13 +190,20 @@ namespace DrawClient.ViewModels
             {
                 type = "DRAW",
                 roomId = this.RoomId,
+
+                userId = ClientSocket.Instance.CurrentUserId,
+
                 x1 = p1.X,
                 y1 = p1.Y,
                 x2 = p2.X,
                 y2 = p2.Y,
+
                 color = this.CurrentColor,
                 thickness = this.CurrentThickness
             };
+            Console.WriteLine(
+                "SEND DRAW USER ID = "
+                + ClientSocket.Instance.CurrentUserId);
             ClientSocket.Instance.Send(msg);
         }
 
@@ -152,7 +214,12 @@ namespace DrawClient.ViewModels
 
         private void ExecuteLeaveRoom(object obj)
         {
-            var leaveMsg = new DrawMessage { type = "LEAVE", roomId = RoomId };
+            var leaveMsg = new DrawMessage
+            {
+                type = "LEAVE",
+                roomId = RoomId,
+                userId = ClientSocket.Instance.CurrentUserId
+            };
             ClientSocket.Instance.Send(leaveMsg);
             GoBackToLobby?.Invoke();
         }

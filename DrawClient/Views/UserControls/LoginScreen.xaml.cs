@@ -90,13 +90,26 @@ namespace DrawClient.Views
                     {
                         using (JsonDocument doc = JsonDocument.Parse(responseBody))
                         {
-                            string token = doc.RootElement.GetProperty("token").GetString();
+                            string token =
+                                doc.RootElement
+                                   .GetProperty("token")
+                                   .GetString();
 
-                            // LƯU TOKEN VÀO VÍ ĐỂ CÁC MÀN HÌNH KHÁC DÙNG
+                            int userId =
+                                doc.RootElement
+                                   .GetProperty("user")
+                                   .GetProperty("user_id")
+                                   .GetInt32();
+
                             LoginViewModel.Token = token;
 
-                            // CHUYỂN MÀN HÌNH SAU KHI ĐĂNG NHẬP THÀNH CÔNG
-                            // Lấy ViewModel đang được gán cho LoginScreen (được gán ở MainWindow)
+                            LoginViewModel.CurrentUserId = userId;
+
+                            ClientSocket.Instance.CurrentUserId = userId;
+
+                            System.Diagnostics.Debug.WriteLine(
+                                "[LOGIN USER ID] = " + userId);
+
                             var viewModel = this.DataContext as LoginViewModel;
                             if (viewModel != null && viewModel.GoToLobby != null)
                             {

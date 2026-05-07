@@ -6,13 +6,19 @@ using System.Net.Sockets;
 using System.Text;
 using System.Text.Json;
 using System.Threading;
+using MySql.Data.MySqlClient;
+using System.Collections.Generic;
 using System.Threading.Tasks;
 
 namespace DrawServer
 {
     public class ServerSocket
     {
+        private string connectionString =
+            "server=localhost;database=online_Drawing_DB;user=root;password=";
+
         private TcpListener server;
+
         // Quản lý phòng: roomId -> danh sách các Client trong phòng đó
         private ConcurrentDictionary<string, ConcurrentDictionary<TcpClient, byte>> rooms
             = new ConcurrentDictionary<string, ConcurrentDictionary<TcpClient, byte>>();
@@ -102,7 +108,14 @@ namespace DrawServer
         {
             try
             {
-                var msg = JsonSerializer.Deserialize<DrawMessage>(jsonMsg);
+                Console.WriteLine("RAW JSON = " + jsonMsg);
+
+                var options = new JsonSerializerOptions
+                {
+                    PropertyNameCaseInsensitive = true
+                };
+
+                var msg = JsonSerializer.Deserialize<DrawMessage>(jsonMsg, options);
                 if (msg == null) return;
 
                 if (msg.type == "JOIN")
@@ -119,10 +132,23 @@ namespace DrawServer
                     _ = NotifyMasterStatusChanged(msg.userId, int.Parse(msg.roomId), true);
 
                     Console.WriteLine($"Client {msg.userId} vào phòng: {msg.roomId}");
+
+                    SendHistoryToClient(client, msg.roomId);
                 }
                 else if (msg.type == "DRAW")
                 {
-                    // Gửi nét vẽ cho tất cả mọi người TRONG CÙNG PHÒNG (trừ người gửi)
+                    // Lấy userId thật từ connection
+                    if (clientMetadata.TryGetValue(client, out var metadata))
+                    {
+                        msg.userId = metadata.UserId;
+                    }
+
+                    Console.WriteLine(
+                        "[SERVER] DRAW USER ID = "
+                        + msg.userId);
+
+                    SaveDrawAction(msg);
+
                     BroadcastToRoom(msg.roomId, jsonMsg, client);
                 }
                 else if (msg.type == "LEAVE")
@@ -182,6 +208,144 @@ namespace DrawServer
             if (rooms.TryGetValue(roomId, out var clients))
             {
                 clients.TryRemove(client, out _);
+            }
+        }
+
+        private void SaveDrawAction(DrawMessage msg)
+        {
+            Console.WriteLine("===== SAVE DRAW =====");
+            Console.WriteLine("roomId = " + msg.roomId);
+            Console.WriteLine("userId = " + msg.userId);
+            Console.WriteLine("type = " + msg.type);
+            try
+            {
+                using (MySqlConnection conn =
+                    new MySqlConnection(connectionString))
+                {
+                    conn.Open();
+
+                    string sql = @"
+        INSERT INTO DrawActions
+        (user_id, room_id, type, data)
+        VALUES
+        (@user_id, @room_id, @type, @data)";
+
+                    using (MySqlCommand cmd =
+                        new MySqlCommand(sql, conn))
+                    {
+                        cmd.Parameters.AddWithValue(
+                            "@user_id",
+                            msg.userId);
+
+                        cmd.Parameters.AddWithValue(
+                            "@room_id",
+                            int.Parse(msg.roomId));
+
+                        cmd.Parameters.AddWithValue(
+                            "@type",
+                            msg.type);
+
+                        string jsonData =
+                            JsonSerializer.Serialize(msg);
+
+                        cmd.Parameters.AddWithValue(
+                            "@data",
+                            jsonData);
+
+                        cmd.ExecuteNonQuery();
+                    }
+                }
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine(ex.ToString());
+            }
+        }
+
+        private List<DrawMessage> LoadHistory(string roomId)
+        {
+            List<DrawMessage> history =
+                new List<DrawMessage>();
+
+            try
+            {
+                using (MySqlConnection conn =
+                    new MySqlConnection(connectionString))
+                {
+                    conn.Open();
+
+                    string sql = @"
+        SELECT data
+        FROM DrawActions
+        WHERE room_id = @room_id
+        ORDER BY created_at ASC";
+
+                    using (MySqlCommand cmd =
+                        new MySqlCommand(sql, conn))
+                    {
+                        cmd.Parameters.AddWithValue(
+                            "@room_id",
+                            int.Parse(roomId));
+
+                        using (var reader =
+                            cmd.ExecuteReader())
+                        {
+                            while (reader.Read())
+                            {
+                                string json =
+                                    reader.GetString("data");
+
+                                var draw =
+                                    JsonSerializer.Deserialize<DrawMessage>(json);
+
+                                if (draw != null)
+                                {
+                                    history.Add(draw);
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine(
+                    "[LOAD HISTORY ERROR] " + ex.Message);
+            }
+
+            return history;
+        }
+
+        private void SendHistoryToClient(TcpClient client, string roomId)
+        {
+            try
+            {
+                var history = LoadHistory(roomId);
+
+                var packet = new
+                {
+                    type = "HISTORY",
+                    roomId = roomId,
+                    actions = history
+                };
+
+                string json =
+                    JsonSerializer.Serialize(packet)
+                    + "\n";
+
+                byte[] data =
+                    Encoding.UTF8.GetBytes(json);
+
+                client.GetStream()
+                    .Write(data, 0, data.Length);
+
+                Console.WriteLine(
+                    $"Đã gửi {history.Count} history actions");
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine(
+                    "[SEND HISTORY ERROR] " + ex.Message);
             }
         }
 
