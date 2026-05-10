@@ -18,20 +18,30 @@ namespace DrawClient
         private StringBuilder buffer = new StringBuilder();
         private string currentRoomId;
 
-        // Thuộc tính lưu trữ UserId hiện tại (Cần được gán sau khi login thành công)
         public int CurrentUserId { get; set; }
+        public string CurrentUsername { get; set; }
+
+        private bool _isRunning = false;
 
         public bool ConnectAndJoinRoomViaMaster(string masterIp, int masterPort, string roomId)
         {
             try
             {
                 Console.WriteLine($"[CLIENT] Đang kết nối Master Server {masterIp}:{masterPort}...");
+
                 using (TcpClient masterClient = new TcpClient(masterIp, masterPort))
                 {
                     var masterStream = masterClient.GetStream();
-                    var req = new MasterRequest { type = "JOIN_ROOM", roomId = roomId };
+
+                    var req = new MasterRequest
+                    {
+                        type = "JOIN_ROOM",
+                        roomId = roomId
+                    };
+
                     string reqJson = JsonSerializer.Serialize(req) + "\n";
                     byte[] reqData = Encoding.UTF8.GetBytes(reqJson);
+
                     masterStream.Write(reqData, 0, reqData.Length);
 
                     byte[] resBuffer = new byte[1024];
@@ -53,6 +63,7 @@ namespace DrawClient
             {
                 Console.WriteLine("CONNECT MASTER ERROR: " + ex.Message);
             }
+
             return false;
         }
 
@@ -69,19 +80,22 @@ namespace DrawClient
                 client = new TcpClient();
                 client.NoDelay = true;
                 client.Connect(nodeIp, nodePort);
+
                 stream = client.GetStream();
+
+                _isRunning = true;
 
                 receiveThread = new Thread(ReceiveLoop);
                 receiveThread.IsBackground = true;
                 receiveThread.Start();
 
-                // Gửi kèm UserId thực tế
                 currentRoomId = roomId;
+
                 Send(new DrawMessage
                 {
                     type = "JOIN",
                     roomId = currentRoomId,
-                    userId = CurrentUserId // Gửi ID người dùng thực tế
+                    userId = CurrentUserId
                 });
 
                 return true;
@@ -100,7 +114,10 @@ namespace DrawClient
                 client = new TcpClient();
                 client.NoDelay = true;
                 client.Connect(ip, port);
+
                 stream = client.GetStream();
+
+                _isRunning = true;
 
                 receiveThread = new Thread(ReceiveLoop);
                 receiveThread.IsBackground = true;
@@ -110,6 +127,7 @@ namespace DrawClient
             }
             catch (Exception ex)
             {
+                Console.WriteLine("CONNECT ERROR: " + ex.Message);
                 return false;
             }
         }
@@ -119,7 +137,7 @@ namespace DrawClient
             if (client == null || !client.Connected) return;
 
             currentRoomId = roomId;
-            // Gửi kèm UserId khi Join qua danh sách
+
             Send(new DrawMessage
             {
                 type = "JOIN",
@@ -132,25 +150,37 @@ namespace DrawClient
         private void ReceiveLoop()
         {
             byte[] receiveBuffer = new byte[4096];
+
             try
             {
-                while (true)
+                while (_isRunning)
                 {
+                    if (stream == null || !client.Connected)
+                        break;
+
                     int len = stream.Read(receiveBuffer, 0, receiveBuffer.Length);
                     if (len <= 0) break;
+
                     buffer.Append(Encoding.UTF8.GetString(receiveBuffer, 0, len));
+
                     while (true)
                     {
                         string content = buffer.ToString();
                         int index = content.IndexOf('\n');
+
                         if (index < 0) break;
+
                         string msg = content.Substring(0, index);
                         buffer.Remove(0, index + 1);
+
                         HandleMessage(msg);
                     }
                 }
             }
-            catch { }
+            catch (Exception ex)
+            {
+                Console.WriteLine("RECEIVE ERROR: " + ex.Message);
+            }
         }
         #endregion
 
@@ -159,12 +189,10 @@ namespace DrawClient
         {
             try
             {
-                if (stream == null || !client.Connected) return;
+                if (stream == null || client == null || !client.Connected)
+                    return;
 
                 string json = JsonSerializer.Serialize(obj);
-
-                Console.WriteLine("[SEND JSON]");
-                Console.WriteLine(json);
 
                 byte[] data = Encoding.UTF8.GetBytes(json + "\n");
 
@@ -172,7 +200,7 @@ namespace DrawClient
             }
             catch (Exception ex)
             {
-                Console.WriteLine(ex.Message);
+                Console.WriteLine("SEND ERROR: " + ex.Message);
             }
         }
         #endregion
@@ -182,31 +210,25 @@ namespace DrawClient
         {
             try
             {
-                using (JsonDocument doc =
-                    JsonDocument.Parse(msg))
+                using (JsonDocument doc = JsonDocument.Parse(msg))
                 {
-                    string type =
-                        doc.RootElement
-                            .GetProperty("type")
-                            .GetString();
+                    if (!doc.RootElement.TryGetProperty("type", out JsonElement typeElement))
+                        return;
 
-                    // HISTORY packet
+                    string type = typeElement.GetString();
+
                     if (type == "HISTORY")
                     {
                         OnMessageReceived?.Invoke(msg);
                         return;
                     }
 
-                    var options =
-                        new JsonSerializerOptions
-                        {
-                            PropertyNameCaseInsensitive = true
-                        };
+                    var options = new JsonSerializerOptions
+                    {
+                        PropertyNameCaseInsensitive = true
+                    };
 
-                    var draw =
-                        JsonSerializer.Deserialize<DrawMessage>(
-                            msg,
-                            options);
+                    var draw = JsonSerializer.Deserialize<DrawMessage>(msg, options);
 
                     if (draw != null)
                     {
@@ -214,10 +236,29 @@ namespace DrawClient
                     }
                 }
             }
-            catch
+            catch (Exception ex)
             {
+                Console.WriteLine("HANDLE MESSAGE ERROR: " + ex.Message);
             }
         }
         #endregion
+
+        public void Disconnect()
+        {
+            try
+            {
+                _isRunning = false;
+
+                receiveThread?.Interrupt();
+            }
+            catch { }
+
+            try { stream?.Close(); } catch { }
+            try { client?.Close(); } catch { }
+
+            stream = null;
+            client = null;
+            receiveThread = null;
+        }
     }
 }

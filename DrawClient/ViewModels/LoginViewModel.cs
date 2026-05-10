@@ -12,42 +12,31 @@ namespace DrawClient.ViewModels
     public class LoginViewModel
     {
         public string Username { get; set; }
-
         public string Password { get; set; }
-
         public string ServerIp { get; set; }
-
         public string Port { get; set; }
-
         public ICommand ConnectCommand { get; }
-
         public Action GoToLobby { get; set; }
 
-        public static string CurrentMasterIp { get; set; }
-            = "127.0.0.1";
-
-        public static int CurrentMasterPort { get; set; }
-            = 5000;
-
+        public static string CurrentMasterIp { get; set; } = "127.0.0.1";
+        public static int CurrentMasterPort { get; set; } = 5000;
         public static string Token { get; set; }
-
         public static int CurrentUserId { get; set; }
 
-        private readonly HttpClient _httpClient =
-            new HttpClient();
+        // SỬA TRIỆT ĐỂ TẠI ĐÂY: Khởi tạo sẵn giá trị mặc định là "tula"
+        // Như vậy dù bạn có test bỏ qua Đăng nhập, nó vẫn sẽ gửi tên "tula" thay vì rỗng.
+        public static string CurrentUsername { get; set; } = "tula";
+
+        private readonly HttpClient _httpClient = new HttpClient();
 
         public LoginViewModel()
         {
-            ConnectCommand =
-                new RelayCommand(
-                    async (obj) => await ExecuteConnect());
-
+            ConnectCommand = new RelayCommand(async (obj) => await ExecuteConnect());
             ServerIp = "127.0.0.1";
-
             Port = "5000";
 
-            Username = "aa";
-
+            // Đặt UI cũng hiển thị mặc định tên bạn
+            Username = "tula";
             Password = "123456";
         }
 
@@ -61,108 +50,39 @@ namespace DrawClient.ViewModels
                     password = Password
                 };
 
-                string json =
-                    JsonSerializer.Serialize(loginReq);
+                string json = JsonSerializer.Serialize(loginReq);
+                var content = new StringContent(json, Encoding.UTF8, "application/json");
 
-                var content =
-                    new StringContent(
-                        json,
-                        Encoding.UTF8,
-                        "application/json");
-
-                var response =
-                    await _httpClient.PostAsync(
-                        "http://localhost:5274/api/auth/login",
-                        content);
-
-                string responseJson =
-                    await response.Content.ReadAsStringAsync();
-
-                System.Diagnostics.Debug.WriteLine(
-                    "[LOGIN RESPONSE]");
-
-                System.Diagnostics.Debug.WriteLine(
-                    responseJson);
+                var response = await _httpClient.PostAsync("http://localhost:5274/api/auth/login", content);
+                string responseJson = await response.Content.ReadAsStringAsync();
 
                 if (!response.IsSuccessStatusCode)
                 {
-                    MessageBox.Show(
-                        "Login thất bại");
-
+                    MessageBox.Show("Login thất bại");
                     return;
                 }
 
-                var options =
-                    new JsonSerializerOptions
-                    {
-                        PropertyNameCaseInsensitive = true
-                    };
+                var options = new JsonSerializerOptions { PropertyNameCaseInsensitive = true };
+                var result = JsonSerializer.Deserialize<LoginResponse>(responseJson, options);
 
-                var result =
-                    JsonSerializer.Deserialize<LoginResponse>(
-                        responseJson,
-                        options);
+                if (result == null || result.user == null) return;
 
-                if (result == null)
-                {
-                    MessageBox.Show(
-                        "Deserialize fail");
-
-                    return;
-                }
-
-                if (result.user == null)
-                {
-                    MessageBox.Show(
-                        "User data null");
-
-                    return;
-                }
-
-                // Lưu token
+                // Lưu dữ liệu Auth
                 Token = result.token;
+                CurrentUserId = result.user.user_id;
 
-                // Lưu user id
-                CurrentUserId =
-                    result.user.user_id;
+                // Ghi đè tên mới nếu người dùng thực sự có nhập ở màn hình Đăng nhập
+                CurrentUsername = string.IsNullOrWhiteSpace(Username) ? "tula" : Username;
 
                 // Gán cho socket
-                ClientSocket.Instance.CurrentUserId =
-                    result.user.user_id;
+                ClientSocket.Instance.CurrentUserId = CurrentUserId;
+                ClientSocket.Instance.CurrentUsername = CurrentUsername;
 
-                System.Diagnostics.Debug.WriteLine(
-                    "[AFTER SET USER ID] = "
-                    + CurrentUserId);
-
-                System.Diagnostics.Debug.WriteLine(
-                    "[LOGIN USER ID] = "
-                    + result.user.user_id);
-
-                System.Diagnostics.Debug.WriteLine(
-                    "[STATIC USER ID] = "
-                    + CurrentUserId);
-
-                System.Diagnostics.Debug.WriteLine(
-                    "[SOCKET USER ID] = "
-                    + ClientSocket.Instance.CurrentUserId);
-
-                // Lưu thông tin Master
-                CurrentMasterIp = ServerIp;
-
-                CurrentMasterPort =
-                    int.Parse(Port);
-
-                MessageBox.Show(
-                    "LOGIN USER ID = "
-                    + CurrentUserId);
-                // Chuyển sang Lobby
                 GoToLobby?.Invoke();
             }
             catch (Exception ex)
             {
-                MessageBox.Show(
-                    "Login error: "
-                    + ex.Message);
+                MessageBox.Show("Login error: " + ex.Message);
             }
         }
     }
