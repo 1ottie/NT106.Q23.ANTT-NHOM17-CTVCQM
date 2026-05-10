@@ -1,5 +1,6 @@
 ﻿using DrawClient.ViewModels;
 using System;
+using System.Collections.Generic;
 using System.ComponentModel;
 using System.Windows;
 using System.Windows.Controls;
@@ -14,6 +15,9 @@ namespace DrawClient.Views.UserControls
         private Point lastPoint;
         private bool isDrawing = false;
         private CanvasViewModel _viewModel;
+        private Point _startPoint;
+        private Stroke _currentTempStroke; // Stroke tạm thời để hiển thị khi đang kéo chuột
+        private bool isShapeDrawing = false;
 
         public Canvas()
         {
@@ -105,10 +109,16 @@ namespace DrawClient.Views.UserControls
         // Cập nhật trực tiếp lên Canvas thực tế
         private void UpdateCurrentDrawingAttributes(CanvasViewModel vm)
         {
+            if (vm?.Toolbar == null) return;
+
+            string penType = vm.Toolbar.CurrentPenType?.ToLowerInvariant();
+            string selectedTool = vm.SelectedTool?.ToLowerInvariant();
+            double size = vm.Toolbar.IsEraserSelected ? vm.Toolbar.EraserSize : vm.Toolbar.PencilSize;
+            bool isEraser = selectedTool == "eraser";
+
             try
             {
                 var color = (System.Windows.Media.Color)System.Windows.Media.ColorConverter.ConvertFromString(vm.Toolbar.CurrentColor);
-                var size = vm.Toolbar.CurrentThickness;
 
                 var attributes = new DrawingAttributes
                 {
@@ -117,8 +127,8 @@ namespace DrawClient.Views.UserControls
                     Height = size,
                     FitToCurve = true,
                     IgnorePressure = true,
-                    IsHighlighter = false, // Reset dạ quang
-                    StylusTip = StylusTip.Ellipse // Reset đầu tròn
+                    IsHighlighter = false,
+                    StylusTip = StylusTip.Ellipse
                 };
 
                 // Chỉnh nét vẽ cho từng loại bút
@@ -134,10 +144,10 @@ namespace DrawClient.Views.UserControls
                         attributes.Height = size * 1.5;
                         attributes.Width = size * 1.5;
                         attributes.StylusTip = StylusTip.Rectangle;
-                        attributes.Color = System.Windows.Media.Color.FromArgb(120, color.R, color.G, color.B); // Màu trong suốt
+                        attributes.Color = System.Windows.Media.Color.FromArgb(120, color.R, color.G, color.B);
                         break;
                     case "Laser":
-                        attributes.Color = System.Windows.Media.Color.FromArgb(150, 255, 0, 0); // Đỏ phát sáng
+                        attributes.Color = System.Windows.Media.Color.FromArgb(150, 255, 0, 0);
                         attributes.Width = size;
                         break;
                     case "Brush":
@@ -152,18 +162,24 @@ namespace DrawClient.Views.UserControls
                         break;
                 }
 
-                // Gán thuộc tính mới vào nét vẽ hiện tại
                 MyCanvas.DefaultDrawingAttributes = attributes;
-
-                // Cập nhật luôn size của cục tẩy cho đồng bộ
-                try
+                if (EraserCursor != null)
                 {
-                    MyCanvas.EraserShape = new EllipseStylusShape(size, size);
+                    EraserCursor.Width = size;
+                    EraserCursor.Height = size;
                 }
-                catch { }
 
-                // Trả về chế độ vẽ nét (tránh bị kẹt chế độ cục tẩy)
-                if (vm.Toolbar.IsPencilSelected)
+                var shapes = new List<string> { "square", "circle", "triangle", "line", "rectangle", "ellipse" };
+
+                if (isEraser)
+                {
+                    MyCanvas.EditingMode = InkCanvasEditingMode.EraseByPoint;
+                }
+                else if (penType != null && shapes.Contains(penType)) // nhận diện tất cả các hình
+                {
+                    MyCanvas.EditingMode = InkCanvasEditingMode.None; // Tắt ink để vẽ hình
+                }
+                else
                 {
                     MyCanvas.EditingMode = InkCanvasEditingMode.Ink;
                 }
@@ -241,14 +257,13 @@ namespace DrawClient.Views.UserControls
 
         private void Canvas_MouseDown(object sender, MouseButtonEventArgs e)
         {
-            if (_viewModel == null)
-                return;
+            if (_viewModel?.Toolbar == null) return;
 
-            bool isEraser =
-                _viewModel.SelectedTool?.ToLower() == "eraser";
+            string penType = _viewModel.Toolbar.CurrentPenType?.ToLowerInvariant();
+            string selectedTool = _viewModel.SelectedTool?.ToLowerInvariant();
+            bool isEraser = selectedTool == "eraser";
 
-            if (_viewModel.CurrentEditingMode != InkCanvasEditingMode.Ink
-                && !isEraser)
+            if (_viewModel.CurrentEditingMode != InkCanvasEditingMode.Ink && !isEraser)
             {
                 return;
             }
@@ -256,72 +271,109 @@ namespace DrawClient.Views.UserControls
             if (e.LeftButton != MouseButtonState.Pressed)
                 return;
 
-            isDrawing = true;
-
-            lastPoint = e.GetPosition(MyCanvas);
-
-            MyCanvas.CaptureMouse();
-
+            // 1. Nếu là Eraser
             if (isEraser)
             {
+                isDrawing = true;
+                lastPoint = e.GetPosition(MyCanvas);
+                MyCanvas.CaptureMouse();
                 UpdateEraserCursor(lastPoint);
+                if (EraserCursor != null) EraserCursor.Visibility = Visibility.Visible;
+                return;
+            }
 
-                if (EraserCursor != null)
-                {
-                    EraserCursor.Visibility = Visibility.Visible;
-                }
+            // 2. Nếu là Shape
+            var shapes = new List<string> { "square", "circle", "triangle", "line", "rectangle", "ellipse" };
+            if (penType != null && shapes.Contains(penType))
+            {
+                isShapeDrawing = true;
+                _startPoint = e.GetPosition(MyCanvas);
+                MyCanvas.CaptureMouse();
+                MyCanvas.EditingMode = InkCanvasEditingMode.None;
+                return;
+            }
+
+            // 3. Nếu là vẽ bình thường (Ink)
+            if (_viewModel.CurrentEditingMode == InkCanvasEditingMode.Ink)
+            {
+                isDrawing = true;
+                lastPoint = e.GetPosition(MyCanvas);
+                MyCanvas.CaptureMouse();
             }
         }
-
         private void Canvas_MouseMove(object sender, MouseEventArgs e)
         {
-            if (_viewModel == null)
-                return;
-
-            if (!isDrawing ||
-                e.LeftButton != MouseButtonState.Pressed)
+            if (_viewModel?.Toolbar == null || e.LeftButton != MouseButtonState.Pressed)
                 return;
 
             Point currentPoint = e.GetPosition(MyCanvas);
+            string tool = _viewModel.SelectedTool?.ToLowerInvariant();
+            string penType = _viewModel.Toolbar.CurrentPenType?.ToLowerInvariant();
 
-            if (_viewModel.CurrentEditingMode != InkCanvasEditingMode.Ink &&
-            _viewModel.SelectedTool?.ToLower() != "eraser")
+            // SHAPE MODE 
+            if (isShapeDrawing)
             {
-                return;
+                if (_currentTempStroke != null)
+                {
+                    MyCanvas.Strokes.Remove(_currentTempStroke);
+                }
+
+                StylusPointCollection points = null;
+
+                if (penType == "square" || penType == "rectangle")
+                    points = CreateRectanglePoints(_startPoint, currentPoint);
+                else if (penType == "circle" || penType == "ellipse")
+                    points = CreateEllipsePoints(_startPoint, currentPoint);
+                else if (penType == "triangle")
+                    points = CreateTrianglePoints(_startPoint, currentPoint);
+                else if (penType == "line")
+                    points = CreateLinePoints(_startPoint, currentPoint);
+
+                if (points != null)
+                {
+                    _currentTempStroke = new Stroke(points)
+                    {
+                        DrawingAttributes = MyCanvas.DefaultDrawingAttributes.Clone()
+                    };
+                    _currentTempStroke.DrawingAttributes.FitToCurve = false;
+                    MyCanvas.Strokes.Add(_currentTempStroke);
+                }
+                return; // Đảm bảo thoát ra, không chạy xuống code vẽ nét
             }
 
             // ERASER
-            if (_viewModel.SelectedTool?.ToLower() == "eraser")
+            if (_viewModel.CurrentEditingMode != InkCanvasEditingMode.Ink && tool == "eraser")
+                return;
+
+            if (tool == "eraser")
             {
                 MyCanvas.Strokes.Erase(
                     new Point[] { lastPoint, currentPoint },
-                    new EllipseStylusShape(
-                        _viewModel.Toolbar.CurrentThickness, 
-                        _viewModel.Toolbar.CurrentThickness)); 
+                    new EllipseStylusShape(_viewModel.Toolbar.CurrentThickness, _viewModel.Toolbar.CurrentThickness));
 
                 _viewModel.SendDrawData(lastPoint, currentPoint);
-
                 lastPoint = currentPoint;
 
                 UpdateEraserCursor(currentPoint);
-
                 return;
             }
 
-            // FIX DOUBLE DRAW:
-            // KHÔNG DrawLineLocal local nữa
-            // InkCanvas native sẽ tự vẽ
-
-            _viewModel.SendDrawData(
-                lastPoint,
-                currentPoint);
-
-            lastPoint = currentPoint;
+            // NORMAL DRAW (INK)
+            if (isDrawing)
+            {
+                _viewModel.SendDrawData(lastPoint, currentPoint);
+                lastPoint = currentPoint;
+            }
         }
-
         private void Canvas_MouseUp(object sender, MouseButtonEventArgs e)
         {
-            isDrawing = false;
+            if (isDrawing)
+            {
+                isDrawing = false;
+                isShapeDrawing = false;
+                _currentTempStroke = null; // Giải phóng stroke tạm
+                MyCanvas.ReleaseMouseCapture();
+            }
 
             if (EraserCursor != null)
             {
@@ -331,6 +383,15 @@ namespace DrawClient.Views.UserControls
             if (MyCanvas.IsMouseCaptured)
             {
                 MyCanvas.ReleaseMouseCapture();
+            }
+            if (isShapeDrawing)
+            {
+                isShapeDrawing = false;
+                MyCanvas.ReleaseMouseCapture();
+                // dọn dẹp biến tạm
+                _currentTempStroke = null;
+                // Trả lại chế độ Ink nếu cần hoặc giữ nguyên tùy 
+                // MyCanvas.EditingMode = InkCanvasEditingMode.Ink;
             }
         }
 
@@ -438,6 +499,65 @@ namespace DrawClient.Views.UserControls
                 }
             }
         }
-    }
+        // vẽ hình
+        private StylusPointCollection CreateRectanglePoints(Point start, Point end)
+        {
+            var points = new StylusPointCollection();
+            // Vẽ theo hình chữ nhật: 4 góc khép kín
+            points.Add(new StylusPoint(start.X, start.Y));
+            points.Add(new StylusPoint(end.X, start.Y));
+            points.Add(new StylusPoint(end.X, end.Y));
+            points.Add(new StylusPoint(start.X, end.Y));
+            points.Add(new StylusPoint(start.X, start.Y));
+            return points;
+        }
 
-}
+        private StylusPointCollection CreateEllipsePoints(Point start, Point end)
+        {
+            var points = new StylusPointCollection();
+            double radiusX = Math.Abs(end.X - start.X) / 2;
+            double radiusY = Math.Abs(end.Y - start.Y) / 2;
+            double centerX = Math.Min(start.X, end.X) + radiusX;
+            double centerY = Math.Min(start.Y, end.Y) + radiusY;
+
+            // Giảm khoảng cách góc xuống 5 để nét dày và khít hơn
+            for (int i = 0; i <= 360; i += 5)
+            {
+                double angle = i * Math.PI / 180;
+                double x = centerX + radiusX * Math.Cos(angle);
+                double y = centerY + radiusY * Math.Sin(angle);
+                points.Add(new StylusPoint(x, y));
+            }
+
+            // Đảm bảo điểm kết thúc luôn trùng khít 100% với điểm đầu tiên để đóng kín vòng
+            points.Add(new StylusPoint(centerX + radiusX, centerY));
+
+            return points;
+        }
+        private StylusPointCollection CreateLinePoints(Point start, Point end)
+        {
+            var points = new StylusPointCollection();
+            // Đường thẳng chỉ cần 2 điểm: Điểm bắt đầu và Điểm kết thúc
+            points.Add(new StylusPoint(start.X, start.Y));
+            points.Add(new StylusPoint(end.X, end.Y));
+            return points;
+        }
+
+        private StylusPointCollection CreateTrianglePoints(Point start, Point end)
+        {
+            var points = new StylusPointCollection();
+
+            // Vẽ tam giác cân hướng lên: 
+            // Đỉnh nằm ở giữa cạnh trên, 2 góc ở dưới
+            double topX = start.X + (end.X - start.X) / 2;
+            double topY = start.Y;
+
+            points.Add(new StylusPoint(topX, topY));       // 1. Đỉnh trên cùng
+            points.Add(new StylusPoint(end.X, end.Y));     // 2. Góc dưới cùng bên phải
+            points.Add(new StylusPoint(start.X, end.Y));   // 3. Góc dưới cùng bên trái
+            points.Add(new StylusPoint(topX, topY));       // 4. Vòng lại đỉnh trên để khép kín hình
+
+            return points;
+        }
+    }
+    }

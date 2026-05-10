@@ -294,13 +294,13 @@ namespace DrawClient.ViewModels.Canvas
                 }
 
                 // Gửi sự kiện để Canvas cập nhật ngay lập tức nét vẽ
-                ToolSelected?.Invoke(this, "SizeChanged");
+                //ToolSelected?.Invoke(this, "SizeChanged");
             }
         }
         private void ExecuteChangePenType(string type)
         {
             CurrentPenType = type;
-            ToolSelected?.Invoke(this, "PenTypeChanged");
+            //ToolSelected?.Invoke(this, "PenTypeChanged");
         }
 
         public void ExecuteChangeColor(string hexColor)
