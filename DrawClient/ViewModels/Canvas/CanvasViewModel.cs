@@ -307,8 +307,11 @@ namespace DrawClient.ViewModels
                 if (colorHex is string hex)
                 {
                     CurrentColor = hex;
+                    Toolbar.CurrentColor = hex;
 
                     SelectedTool = "pen";
+                    Toolbar.IsPencilSelected = true;  
+                    Toolbar.IsEraserSelected = false;
                     CurrentEditingMode = InkCanvasEditingMode.Ink;
                 }
             });
@@ -318,10 +321,13 @@ namespace DrawClient.ViewModels
                 if (penType is string type)
                 {
                     CurrentPenType = type;
+                    Toolbar.CurrentPenType = type;
 
                     SelectedTool = "pen";
-                    CurrentEditingMode = InkCanvasEditingMode.Ink;
+                    Toolbar.IsPencilSelected = true;   // Bật bút
+                    Toolbar.IsEraserSelected = false;  // Tắt tẩy
 
+                    CurrentEditingMode = InkCanvasEditingMode.Ink;
                     IsPenMenuOpen = false;
                 }
             });
@@ -333,10 +339,12 @@ namespace DrawClient.ViewModels
                     if (SelectedTool?.ToLower() == "eraser")
                     {
                         EraserThickness = t;
+                        Toolbar.EraserSize = t;
                     }
                     else
                     {
                         PenThickness = t;
+                        Toolbar.PencilSize = t;
                     }
                 }
             });
@@ -345,7 +353,11 @@ namespace DrawClient.ViewModels
         private void ExecuteSelectTool(object obj)
         {
             string tool = obj?.ToString()?.ToLower() ?? "pen";
-
+            // Ngăn không cho các event cập nhật thuộc tính ghi đè lên SelectedTool
+            if (tool == "sizechanged" || tool == "colorchanged" || tool == "pentypechanged")
+            {
+                return;
+            }
             if (tool == "color")
             {
                 IsColorMenuOpen = !IsColorMenuOpen;
@@ -370,9 +382,8 @@ namespace DrawClient.ViewModels
             }
 
             SelectedTool = tool;
-
             IsColorMenuOpen = false;
-            IsPenMenuOpen = false;
+            IsPenMenuOpen = false; ;
 
             switch (tool)
             {
@@ -383,16 +394,20 @@ namespace DrawClient.ViewModels
                 case "pencil":
                 case "pen":
                     CurrentEditingMode = InkCanvasEditingMode.Ink;
+                    Toolbar.IsPencilSelected = true;   
+                    Toolbar.IsEraserSelected = false;
 
                     if (CurrentColor == "#FFFFFF")
                     {
                         CurrentColor = _previousColor;
+                        Toolbar.CurrentColor = _previousColor;
                     }
                     break;
 
                 case "eraser":
                     CurrentEditingMode = InkCanvasEditingMode.EraseByPoint;
-
+                    Toolbar.IsEraserSelected = true;   
+                    Toolbar.IsPencilSelected = false;
                     if (CurrentColor != "#FFFFFF")
                     {
                         _previousColor = CurrentColor;

@@ -636,8 +636,8 @@
 
                     <Canvas Canvas.Left="700" Canvas.Top="320"/>
                 </Canvas>
-  <!-- SIDEBAR -->
-                <Border HorizontalAlignment="Left" VerticalAlignment="Bottom" Margin="20,0,0,20"
+                <!-- SIDEBAR -->
+                <Border HorizontalAlignment="Left" VerticalAlignment="Bottom" Margin="20,0,0,41"
             Background="#FFFFFF"
             CornerRadius="24"
             Padding="4,12"
@@ -992,21 +992,20 @@
                     </Border>
 
                 </Popup>
-                <!--shapes-->
+                <!--shape-->
                 <Popup x:Name="ShapesPopover"
-                           IsOpen="{Binding Toolbar.IsShapePopupOpen, Mode=TwoWay}"
-                           Placement="Right"
-                           PlacementTarget="{Binding ElementName=ShapesButton}"
-                           HorizontalOffset="18"
-                           AllowsTransparency="True"
-                           PopupAnimation="Fade"
-                           StaysOpen="False">
+                 IsOpen="{Binding Toolbar.IsShapePopupOpen, Mode=TwoWay}"
+                 Placement="Right"
+                 PlacementTarget="{Binding ElementName=ShapesButton}"
+                 HorizontalOffset="18"
+                 AllowsTransparency="True"
+                 PopupAnimation="Fade"
+                 StaysOpen="False">
 
-                    <Border 
-                            Background="#FFFFFF" CornerRadius="12" Margin="12,85,0,0" Padding="16" Width="220" Height="241"
-                            VerticalAlignment="Top"
-                            Visibility="{Binding IsShapesPopoverVisible, Converter={StaticResource BoolToVis}}"
-                            d:Visibility="Hidden">
+                    <Border Background="#FFFFFF" 
+                      CornerRadius="12" 
+                      Padding="16" 
+                      Width="220">
                         <Border.Effect>
                             <DropShadowEffect BlurRadius="6" ShadowDepth="1" Opacity="0.15" Color="#3C4043"/>
                         </Border.Effect>
@@ -1014,27 +1013,25 @@
                         <StackPanel>
                             <TextBlock Text="SHAPE" FontSize="12" FontWeight="Medium" Foreground="#5F6368" Margin="0,0,0,8"/>
                             <StackPanel Orientation="Horizontal" Margin="0,0,0,16">
-
                                 <RadioButton GroupName="ShapeTypes" Width="36" Height="36" Margin="0,0,4,0" IsChecked="True" ToolTip="Rectangle" 
-                                                 Style="{StaticResource RadioToolStyle}"
-                                                 Command="{Binding SelectShapeCommand}" CommandParameter="rectangle"
-                                                 Content="M 4 4 L 20 4 L 20 20 L 4 20 Z"/>
+                               Style="{StaticResource RadioToolStyle}"
+                               Command="{Binding Toolbar.ChangePenTypeCommand}" CommandParameter="rectangle"
+                               Content="M 4 4 L 20 4 L 20 20 L 4 20 Z"/>
 
                                 <RadioButton GroupName="ShapeTypes" Width="36" Height="36" Margin="0,0,4,0" ToolTip="Circle" 
-                                                 Style="{StaticResource RadioToolStyle}"
-                                                 Command="{Binding SelectShapeCommand}" CommandParameter="circle"
-                                                 Content="M 12 2 A 10 10 0 1 1 12 22 A 10 10 0 1 1 12 2 Z"/>
+                               Style="{StaticResource RadioToolStyle}"
+                               Command="{Binding Toolbar.ChangePenTypeCommand}" CommandParameter="circle"
+                               Content="M 12 2 A 10 10 0 1 1 12 22 A 10 10 0 1 1 12 2 Z"/>
 
                                 <RadioButton GroupName="ShapeTypes" Width="36" Height="36" Margin="0,0,4,0" ToolTip="Triangle" 
-                                         Style="{StaticResource RadioToolStyle}"
-                                         Command="{Binding SelectShapeCommand}" CommandParameter="triangle"
-                                         Content="M 12 2 L 22 20 L 2 20 Z"/>
+                               Style="{StaticResource RadioToolStyle}"
+                               Command="{Binding Toolbar.ChangePenTypeCommand}" CommandParameter="triangle"
+                               Content="M 12 2 L 22 20 L 2 20 Z"/>
 
                                 <RadioButton GroupName="ShapeTypes" Width="36" Height="36" ToolTip="Line" 
-                                         Style="{StaticResource RadioToolStyle}"
-                                         Command="{Binding SelectShapeCommand}" CommandParameter="line"
-                                         Content="M 2 12 L 22 12"/>
-
+                               Style="{StaticResource RadioToolStyle}"
+                               Command="{Binding Toolbar.ChangePenTypeCommand}" CommandParameter="line"
+                               Content="M 2 12 L 22 12"/>
                             </StackPanel>
 
                             <Grid>
@@ -1043,79 +1040,81 @@
                                     <ColumnDefinition Width="12"/>
                                     <ColumnDefinition Width="*"/>
                                 </Grid.ColumnDefinitions>
-
                                 <StackPanel Grid.Column="0">
                                     <TextBlock Text="FILL" FontSize="12" FontWeight="Medium" Foreground="#5F6368" Margin="0,0,0,8"/>
-                                    <Button Command="{Binding ToggleShapeFillPaletteCommand}" Style="{StaticResource OutlinedColorButtonStyle}" Background="Transparent" BorderBrush="#DADCE0" BorderThickness="1" Cursor="Hand" Padding="5" HorizontalContentAlignment="Stretch">
-                                        <Border Height="20" Background="#FF1AE8C3" CornerRadius="4" BorderBrush="#DADCE0" BorderThickness="0" SnapsToDevicePixels="True"/>
+                                    <Button Command="{Binding ToggleShapeFillPaletteCommand}" Style="{StaticResource OutlinedColorButtonStyle}" Background="Transparent" BorderBrush="#DADCE0" BorderThickness="1" Padding="5" HorizontalContentAlignment="Stretch">
+                                        <Border Height="20" Background="#FF1AE8C3" CornerRadius="4" SnapsToDevicePixels="True"/>
                                     </Button>
                                 </StackPanel>
-
                                 <StackPanel Grid.Column="2">
                                     <TextBlock Text="STROKE" FontSize="12" FontWeight="Medium" Foreground="#5F6368" Margin="0,0,0,8" />
-                                    <Button Command="{Binding ChooseColorCommand}" Style="{StaticResource OutlinedColorButtonStyle}" Background="Transparent" BorderBrush="#DADCE0" BorderThickness="1" Cursor="Hand" Padding="5" HorizontalContentAlignment="Stretch">
-                                        <Border Height="20" Background="{Binding CurrentColor, Converter={StaticResource HexToBrushConverter}}" CornerRadius="4" BorderBrush="#DADCE0" BorderThickness="0" SnapsToDevicePixels="True"/>
+                                    <Button Command="{Binding ChooseColorCommand}" Style="{StaticResource OutlinedColorButtonStyle}" Background="Transparent" BorderBrush="#DADCE0" BorderThickness="1" Padding="5" HorizontalContentAlignment="Stretch">
+                                        <Border Height="20" Background="{Binding CurrentColor, Converter={StaticResource HexToBrushConverter}}" CornerRadius="4" SnapsToDevicePixels="True"/>
                                     </Button>
                                 </StackPanel>
                             </Grid>
 
                             <TextBlock Text="SIZE" FontSize="12" FontWeight="Medium" Foreground="#5F6368" Margin="0,16,0,8"/>
                             <StackPanel Orientation="Horizontal" HorizontalAlignment="Left">
-                                <RadioButton GroupName="ShapeSizeGroup" Tag="2" Style="{StaticResource SizeDotRadioStyle}" Command="{Binding ChangeThicknessCommand}" CommandParameter="2"/>
-                                <RadioButton GroupName="ShapeSizeGroup" Tag="6" IsChecked="True" Style="{StaticResource SizeDotRadioStyle}" Command="{Binding ChangeThicknessCommand}" CommandParameter="6"/>
-                                <RadioButton GroupName="ShapeSizeGroup" Tag="12" Style="{StaticResource SizeDotRadioStyle}" Command="{Binding ChangeThicknessCommand}" CommandParameter="12"/>
-                                <RadioButton GroupName="ShapeSizeGroup" Tag="18" Style="{StaticResource SizeDotRadioStyle}" Command="{Binding ChangeThicknessCommand}" CommandParameter="18"/>
-                                <RadioButton GroupName="ShapeSizeGroup" Tag="24" Style="{StaticResource SizeDotRadioStyle}" Command="{Binding ChangeThicknessCommand}" CommandParameter="24"/>
+                                <RadioButton GroupName="ShapeSizeGroup" Tag="2" Style="{StaticResource SizeDotRadioStyle}" Command="{Binding Toolbar.ChangeThicknessCommand}" CommandParameter="2"/>
+                                <RadioButton GroupName="ShapeSizeGroup" Tag="6" IsChecked="True" Style="{StaticResource SizeDotRadioStyle}" Command="{Binding Toolbar.ChangeThicknessCommand}" CommandParameter="6"/>
+                                <RadioButton GroupName="ShapeSizeGroup" Tag="12" Style="{StaticResource SizeDotRadioStyle}" Command="{Binding Toolbar.ChangeThicknessCommand}" CommandParameter="12"/>
+                                <RadioButton GroupName="ShapeSizeGroup" Tag="18" Style="{StaticResource SizeDotRadioStyle}" Command="{Binding Toolbar.ChangeThicknessCommand}" CommandParameter="18"/>
+                                <RadioButton GroupName="ShapeSizeGroup" Tag="24" Style="{StaticResource SizeDotRadioStyle}" Command="{Binding Toolbar.ChangeThicknessCommand}" CommandParameter="24"/>
                             </StackPanel>
-
-                  
-
-                <Border x:Name="TextPopover" 
-                    Background="#FFFFFF" CornerRadius="12" Margin="622,242,-242,0" Padding="16" Width="220"
-                    VerticalAlignment="Top"
-                    Visibility="{Binding IsTextPopoverVisible, Converter={StaticResource BoolToVis}}"
-                    d:Visibility="Visible">
-                    <Border.Effect>
-                        <DropShadowEffect BlurRadius="6" ShadowDepth="1" Opacity="0.15" Color="#3C4043"/>
-                    </Border.Effect>
-
-                    <StackPanel>
-                        <TextBlock Text="FONT FAMILY" FontSize="12" FontWeight="Medium" Foreground="#5F6368" Margin="0,0,0,8"/>
-
-                        <ComboBox SelectedIndex="0" Margin="0,0,0,16" 
-                              Style="{StaticResource MaterialComboBoxStyle}" 
-                              ItemContainerStyle="{StaticResource MaterialComboBoxItemStyle}">
-                            <ComboBoxItem Content="Roboto"/>
-                            <ComboBoxItem Content="Inter"/>
-                            <ComboBoxItem Content="Arial"/>
-                            <ComboBoxItem Content="Georgia"/>
-                        </ComboBox>
-
-                        <TextBlock Text="FONT SIZE" FontSize="12" FontWeight="Medium" Foreground="#5F6368" Margin="0,0,0,8"/>
-
-                        <ComboBox SelectedIndex="2" Margin="0,0,0,16" 
-                              Style="{StaticResource MaterialComboBoxStyle}" 
-                              ItemContainerStyle="{StaticResource MaterialComboBoxItemStyle}">
-                            <ComboBoxItem Content="12pt"/>
-                            <ComboBoxItem Content="14pt"/>
-                            <ComboBoxItem Content="16pt"/>
-                            <ComboBoxItem Content="24pt"/>
-                        </ComboBox>
-
-                        <TextBlock Text="TEXT COLOR" FontSize="12" FontWeight="Medium" Foreground="#5F6368" Margin="0,0,0,8"/>
-
-                        <Button Command="{Binding ChooseColorCommand}" Style="{StaticResource OutlinedColorButtonStyle}">
-                            <StackPanel Orientation="Horizontal">
-                                <Border Width="20" Height="20" Background="{Binding CurrentColor, Converter={StaticResource HexToBrushConverter}}" CornerRadius="4" BorderBrush="#DADCE0" BorderThickness="0" Margin="0,0,8,0" SnapsToDevicePixels="True"/>
-
-                                <TextBlock Text="Choose color" Foreground="#5F6368" VerticalAlignment="Center" FontSize="13"/>
-                            </StackPanel>
-                        </Button>
-                    </StackPanel>
-                </Border>      </StackPanel>
+                        </StackPanel>
                     </Border>
                 </Popup>
                 <!--text-->
+
+                <Popup x:Name="TextPopover"
+       IsOpen="{Binding Toolbar.IsTextPopupOpen, Mode=TwoWay}"
+       Placement="Right"
+       PlacementTarget="{Binding ElementName=TextButton}"
+       HorizontalOffset="18"
+       AllowsTransparency="True"
+       PopupAnimation="Fade"
+       StaysOpen="False">
+
+                    <Border Background="#FFFFFF" 
+            CornerRadius="12" 
+            Padding="16" 
+            Width="220">
+                        <Border.Effect>
+                            <DropShadowEffect BlurRadius="6" ShadowDepth="1" Opacity="0.15" Color="#3C4043"/>
+                        </Border.Effect>
+
+                        <StackPanel>
+                            <TextBlock Text="FONT FAMILY" FontSize="12" FontWeight="Medium" Foreground="#5F6368" Margin="0,0,0,8"/>
+                            <ComboBox SelectedIndex="0" Margin="0,0,0,16" 
+                      Style="{StaticResource MaterialComboBoxStyle}" 
+                      ItemContainerStyle="{StaticResource MaterialComboBoxItemStyle}">
+                                <ComboBoxItem Content="Roboto"/>
+                                <ComboBoxItem Content="Inter"/>
+                                <ComboBoxItem Content="Arial"/>
+                                <ComboBoxItem Content="Georgia"/>
+                            </ComboBox>
+
+                            <TextBlock Text="FONT SIZE" FontSize="12" FontWeight="Medium" Foreground="#5F6368" Margin="0,0,0,8"/>
+                            <ComboBox SelectedIndex="2" Margin="0,0,0,16" 
+                      Style="{StaticResource MaterialComboBoxStyle}" 
+                      ItemContainerStyle="{StaticResource MaterialComboBoxItemStyle}">
+                                <ComboBoxItem Content="12pt"/>
+                                <ComboBoxItem Content="14pt"/>
+                                <ComboBoxItem Content="16pt"/>
+                                <ComboBoxItem Content="24pt"/>
+                            </ComboBox>
+
+                            <TextBlock Text="TEXT COLOR" FontSize="12" FontWeight="Medium" Foreground="#5F6368" Margin="0,0,0,8"/>
+                            <Button Command="{Binding ChooseColorCommand}" Style="{StaticResource OutlinedColorButtonStyle}">
+                                <StackPanel Orientation="Horizontal">
+                                    <Border Width="20" Height="20" Background="{Binding CurrentColor, Converter={StaticResource HexToBrushConverter}}" CornerRadius="4" Margin="0,0,8,0" SnapsToDevicePixels="True"/>
+                                    <TextBlock Text="Choose color" Foreground="#5F6368" VerticalAlignment="Center" FontSize="13"/>
+                                </StackPanel>
+                            </Button>
+                        </StackPanel>
+                    </Border>
+                </Popup>
             </Grid>
 
             <Border Grid.Column="1" Background="#FFFFFF" BorderBrush="#E8EAED" BorderThickness="1,0,0,0" Panel.ZIndex="10">
@@ -1204,8 +1203,8 @@
             </Border>
         </Grid>
 
-        <Border HorizontalAlignment="Center" VerticalAlignment="Top" 
-                Margin="0,647,0,0" Padding="24,12" MinWidth="220" 
+        <Border HorizontalAlignment="Left" VerticalAlignment="Top" 
+                Margin="316,630,0,0" Padding="24,12" MinWidth="220" 
                 Background="#202124" CornerRadius="22" Panel.ZIndex="999"
                 Visibility="{Binding IsOcrToastVisible, Converter={StaticResource BoolToVis}}"
                 d:Visibility="Visible" Grid.Row="1" Width="284" Height="53">
