@@ -57,7 +57,7 @@
                 </Border>
 
                 <Border Grid.Column="2" Width="32" Height="32" Background="#1A73E8" CornerRadius="16">
-                    <TextBlock Text="JD" Foreground="White" FontSize="14" FontWeight="Medium" HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                    <TextBlock Text="{Binding CurrentUserInitials}" Foreground="White" FontSize="14" FontWeight="Medium" HorizontalAlignment="Center" VerticalAlignment="Center"/>
                 </Border>
             </Grid>
         </Border>

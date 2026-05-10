@@ -4,11 +4,84 @@
              xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006" 
              xmlns:d="http://schemas.microsoft.com/expression/blend/2008" 
              xmlns:local="clr-namespace:DrawClient.Views.UserControls"
+             xmlns:converters="clr-namespace:DrawClient.Converters"
              mc:Ignorable="d" 
              d:DesignHeight="800" d:DesignWidth="1200"
              Background="#FFFFFF">
     <UserControl.Resources>
         <BooleanToVisibilityConverter x:Key="BoolToVis"/>
+        <converters:HexToBrushConverter x:Key="HexToBrushConverter"/>
+        <Style x:Key="PenTypeRadioStyle" TargetType="RadioButton">
+            <Setter Property="Background" Value="#F3F4F6"/>
+            <Setter Property="BorderThickness" Value="2"/>
+            <Setter Property="BorderBrush" Value="Transparent"/>
+            <Setter Property="Cursor" Value="Hand"/>
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="RadioButton">
+                        <Border Background="{TemplateBinding Background}" BorderThickness="{TemplateBinding BorderThickness}" BorderBrush="{TemplateBinding BorderBrush}" CornerRadius="8">
+                            <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                        </Border>
+                        <ControlTemplate.Triggers>
+                            <Trigger Property="IsChecked" Value="True">
+                                <Setter Property="Background" Value="#E8F0FE"/>
+                                <Setter Property="BorderBrush" Value="#1A73E8"/>
+                            </Trigger>
+                        </ControlTemplate.Triggers>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
+        <Style x:Key="ColorRadioStyle" TargetType="RadioButton">
+            <Setter Property="Width" Value="32"/>
+            <Setter Property="Height" Value="32"/>
+            <Setter Property="Margin" Value="0,0,10,0"/>
+            <Setter Property="Cursor" Value="Hand"/>
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="RadioButton">
+                        <Grid>
+                            <Ellipse x:Name="OuterRing" Width="32" Height="32" Stroke="Transparent" StrokeThickness="2"/>
+                            <Ellipse x:Name="InnerColor" Width="22" Height="22" Fill="{TemplateBinding Background}"/>
+                        </Grid>
+                        <ControlTemplate.Triggers>
+                            <Trigger Property="IsChecked" Value="True">
+                                <Setter TargetName="OuterRing" Property="Stroke" Value="#1A73E8"/>
+                            </Trigger>
+                        </ControlTemplate.Triggers>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
+        <Style x:Key="SizeDotRadioStyle" TargetType="RadioButton">
+            <Setter Property="Background" Value="#5F6368"/>
+            <Setter Property="Cursor" Value="Hand"/>
+
+            <Setter Property="Margin" Value="0,0"/>
+
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="RadioButton">
+                        <Grid Width="32" Height="32" Background="Transparent">
+                            <Ellipse x:Name="OuterBorder" Width="30" Height="30" 
+                                   Stroke="Transparent" StrokeThickness="2" Fill="Transparent"/>
+
+                            <Ellipse x:Name="InnerDot" 
+                                   Width="{TemplateBinding FontSize}" 
+                                   Height="{TemplateBinding FontSize}" 
+                                   Fill="{TemplateBinding Background}" 
+                                   HorizontalAlignment="Center" 
+                                   VerticalAlignment="Center"/>
+                        </Grid>
+                        <ControlTemplate.Triggers>
+                            <Trigger Property="IsChecked" Value="True">
+                                <Setter TargetName="OuterBorder" Property="Stroke" Value="#1A73E8"/>
+                            </Trigger>
+                        </ControlTemplate.Triggers>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
         <Style x:Key="VectorToolStyle" TargetType="Button" >
             <Setter Property="Foreground" Value="#5F6368"/>
             <Setter Property="Background" Value="Transparent"/>
@@ -46,23 +119,27 @@
                 <Setter.Value>
                     <ControlTemplate TargetType="RadioButton">
                         <Border CornerRadius="20" Background="{TemplateBinding Background}">
-                            <Path Data="{Binding Content, RelativeSource={RelativeSource TemplatedParent}}"
-      Stroke="{TemplateBinding Foreground}"
-      StrokeThickness="1.5"
-      Fill="Transparent"
-      Stretch="Uniform"
-      Width="18" Height="18"
-      HorizontalAlignment="Center"
-      VerticalAlignment="Center"
-      StrokeLineJoin="Round"
-      StrokeStartLineCap="Round"
-      StrokeEndLineCap="Round"/>
+                            <Path x:Name="ToolIcon" 
+                                  Data="{Binding Content, RelativeSource={RelativeSource TemplatedParent}}"
+                                  Stroke="{TemplateBinding Foreground}"
+                                  StrokeThickness="1.5"
+                                  Fill="Transparent"
+                                  Stretch="Uniform"
+                                  Width="18" Height="18"
+                                  HorizontalAlignment="Center"
+                                  VerticalAlignment="Center"
+                                  StrokeLineJoin="Round"
+                                  StrokeStartLineCap="Round"
+                                  StrokeEndLineCap="Round"/>
                         </Border>
+
                         <ControlTemplate.Triggers>
                             <Trigger Property="IsChecked" Value="True">
                                 <Setter Property="Background" Value="#E8F0FE"/>
                                 <Setter Property="Foreground" Value="#1A73E8"/>
+                                <Setter TargetName="ToolIcon" Property="StrokeThickness" Value="2.5"/>
                             </Trigger>
+
                             <MultiTrigger>
                                 <MultiTrigger.Conditions>
                                     <Condition Property="IsMouseOver" Value="True"/>
@@ -187,158 +264,357 @@
             </Setter>
         </Style>
     </UserControl.Resources>
+
     <Grid>
+
+        <Grid.ColumnDefinitions>
+            <ColumnDefinition Width="Auto" MinWidth="1200"/>
+            <ColumnDefinition Width="0*"/>
+        </Grid.ColumnDefinitions>
+
         <Grid.RowDefinitions>
             <RowDefinition Height="60"/>
             <RowDefinition Height="*"/>
         </Grid.RowDefinitions>
-        <!-- Navigation -->
-        <Border Grid.Row="0" Background="#FFFFFF" BorderBrush="#E8EAED" BorderThickness="0,0,0,1" Padding="24,0" Panel.ZIndex="10">
+        <Border Grid.Row="0"
+        Background="#FFFFFF"
+        BorderBrush="#E8EAED"
+        BorderThickness="0,0,0,1"
+        Padding="24,0"
+        Panel.ZIndex="10">
+
             <Grid>
+
                 <Grid.ColumnDefinitions>
                     <ColumnDefinition Width="Auto"/>
                     <ColumnDefinition Width="*"/>
                     <ColumnDefinition Width="Auto"/>
                 </Grid.ColumnDefinitions>
-                <StackPanel Grid.Column="0" Orientation="Horizontal" VerticalAlignment="Center">
-                    <!--Nút rời phòng-->
-                    <Button Command="{Binding LeaveRoomCommand}" Background="Transparent" BorderThickness="0" Margin="0,0,16,0" Cursor="Hand" ToolTip="Leave Room" Style="{StaticResource VectorToolStyle}" Width="36">
-                        <Path Data="M 18,2 L 6,12 18,22"
-      Stroke="Black"
-      StrokeThickness="1.5"
-      StrokeLineJoin="Round"
-      StrokeStartLineCap="Round"
-      StrokeEndLineCap="Round"
-      Fill="Transparent"
-      Stretch="Uniform"
-      Width="18" Height="18" RenderTransformOrigin="0.685,0.461" Margin="-2,0,0,0"
-                              />
-                    </Button>
-                    <!--Tên phòng-->
-                    <Rectangle Width="1" Height="24" Margin="0,0,5,0"/>
 
-                    <Button Command="{Binding ShowRoomInfoCommand}" Background="Transparent" BorderThickness="0" Cursor="Hand" Margin="0,0,20,0">
+                <!-- Left -->
+                <StackPanel Grid.Column="0"
+                    Orientation="Horizontal"
+                    VerticalAlignment="Center">
+
+                    <!-- Back -->
+                    <Button Command="{Binding LeaveRoomCommand}"
+                    Background="Transparent"
+                    BorderThickness="0"
+                    Margin="0,0,16,0"
+                    Cursor="Hand"
+                    ToolTip="Leave Room"
+                    Style="{StaticResource VectorToolStyle}"
+                    Width="36"
+                    Height="36">
+
+                        <Path Data="M 18,2 L 6,12 18,22"
+                      Stroke="Black"
+                      StrokeThickness="1.5"
+                      StrokeLineJoin="Round"
+                      StrokeStartLineCap="Round"
+                      StrokeEndLineCap="Round"
+                      Fill="Transparent"
+                      Stretch="Uniform"
+                      Width="18"
+                      Height="18"
+                      Margin="-2,0,0,0"/>
+                    </Button>
+
+                    <!-- Divider -->
+                    <Rectangle Width="1"
+                       Height="24"
+                       Fill="#E8EAED"
+                       Margin="0,0,5,0"/>
+
+                    <!-- Room Name -->
+                    <Button Command="{Binding ShowRoomInfoCommand}"
+                    Background="Transparent"
+                    BorderThickness="0"
+                    Cursor="Hand"
+                    Margin="0,0,20,0"
+                    FocusVisualStyle="{x:Null}">
+
                         <Button.ToolTip>
                             <ToolTip Content="Nhấp để xem Mã phòng và Mật khẩu"/>
                         </Button.ToolTip>
+
                         <Button.Template>
                             <ControlTemplate TargetType="Button">
-                                <TextBlock Text="{Binding RoomName}" FontSize="16" FontWeight="SemiBold" Foreground="#202124" VerticalAlignment="Center" RenderTransformOrigin="0.664,0.608"/>
+
+                                <TextBlock Text="{Binding RoomName}"
+                                   FontSize="16"
+                                   FontWeight="SemiBold"
+                                   Foreground="#202124"
+                                   VerticalAlignment="Center"/>
+
                             </ControlTemplate>
                         </Button.Template>
                     </Button>
 
-                    <Rectangle Width="1" Height="24" Fill="#E8EAED" Margin="0,0,16,0"/>
+                    <!-- Divider -->
+                    <Rectangle Width="1"
+                       Height="24"
+                       Fill="#E8EAED"
+                       Margin="0,0,16,0"/>
 
-                    <!--UNDO-->
-                    <Button Width="36" Height="36" Background="Transparent" BorderThickness="0" Margin="0,0,8,0" ToolTip="Undo" Cursor="Hand" Style="{StaticResource VectorToolStyle}">
+                    <!-- Undo -->
+                    <Button Width="36"
+                    Height="36"
+                    Background="Transparent"
+                    BorderThickness="0"
+                    Margin="0,0,8,0"
+                    ToolTip="Undo"
+                    Cursor="Hand"
+                    Style="{StaticResource VectorToolStyle}">
+
                         <Path Data="M3 7v6h6 M21 17a9 9 0 0 0-9-9 9 9 0 0 0-6 2.3L3 13"
-			                  Stroke="#5F6368" StrokeThickness="1.5" Fill="Transparent"
-			                  Width="18" Height="18" Stretch="Uniform"
-			                  HorizontalAlignment="Center" VerticalAlignment="Center"
-			                  StrokeLineJoin="Round" StrokeStartLineCap="Round" StrokeEndLineCap="Round"/>
+                      Stroke="#5F6368"
+                      StrokeThickness="1.5"
+                      Fill="Transparent"
+                      Width="18"
+                      Height="18"
+                      Stretch="Uniform"
+                      HorizontalAlignment="Center"
+                      VerticalAlignment="Center"
+                      StrokeLineJoin="Round"
+                      StrokeStartLineCap="Round"
+                      StrokeEndLineCap="Round"/>
                     </Button>
-                    <!--REDO-->
-                    <Button Width="36" Height="36" Background="Transparent" BorderThickness="0" ToolTip="Redo" Cursor="Hand" Style="{StaticResource VectorToolStyle}">
+
+                    <!-- Redo -->
+                    <Button Width="36"
+                    Height="36"
+                    Background="Transparent"
+                    BorderThickness="0"
+                    ToolTip="Redo"
+                    Cursor="Hand"
+                    Style="{StaticResource VectorToolStyle}">
+
                         <Path Data="M21 7v6h-6 M3 17a9 9 0 0 1 9-9 9 9 0 0 1 6 2.3l3 2.7"
-			                  Stroke="#5F6368" StrokeThickness="1.5" Fill="Transparent"
-			                  Width="18" Height="18" Stretch="Uniform"
-			                  HorizontalAlignment="Center" VerticalAlignment="Center"
-			                  StrokeLineJoin="Round" StrokeStartLineCap="Round" StrokeEndLineCap="Round"/>
+                      Stroke="#5F6368"
+                      StrokeThickness="1.5"
+                      Fill="Transparent"
+                      Width="18"
+                      Height="18"
+                      Stretch="Uniform"
+                      HorizontalAlignment="Center"
+                      VerticalAlignment="Center"
+                      StrokeLineJoin="Round"
+                      StrokeStartLineCap="Round"
+                      StrokeEndLineCap="Round"/>
                     </Button>
+
                 </StackPanel>
-                <!--THANH REPLAY-->
-                <Border Grid.Column="1" Background="#F8F9FA" CornerRadius="8" Margin="40,12" Padding="16,0" MaxWidth="500">
+
+                <!-- Center -->
+                <Border Grid.Column="1"
+                Background="#F8F9FA"
+                CornerRadius="8"
+                Margin="40,12"
+                Padding="16,0"
+                MaxWidth="500">
+
                     <Grid>
+
                         <Grid.ColumnDefinitions>
                             <ColumnDefinition Width="Auto"/>
                             <ColumnDefinition Width="*"/>
                             <ColumnDefinition Width="50"/>
                         </Grid.ColumnDefinitions>
 
-                        <Button Grid.Column="0" Width="36" Height="36" Background="Transparent" BorderThickness="0" VerticalAlignment="Center" Cursor="Hand" Style="{StaticResource VectorToolStyle}">
+                        <!-- Play -->
+                        <Button Grid.Column="0"
+                        Width="36"
+                        Height="36"
+                        Background="Transparent"
+                        BorderThickness="0"
+                        VerticalAlignment="Center"
+                        Cursor="Hand"
+                        Style="{StaticResource VectorToolStyle}">
+
                             <Path Data="M5 3 L19 12 L5 21 Z"
-                  Stroke="#5F6368" StrokeThickness="1.5" Fill="Transparent"
-                  Width="16" Height="16" Stretch="Uniform"
-                  HorizontalAlignment="Center" VerticalAlignment="Center"
-                  StrokeLineJoin="Round" StrokeStartLineCap="Round" Margin="2.5,0,0,0"/>
+                          Stroke="#5F6368"
+                          StrokeThickness="1.5"
+                          Fill="Transparent"
+                          Width="16"
+                          Height="16"
+                          Stretch="Uniform"
+                          HorizontalAlignment="Center"
+                          VerticalAlignment="Center"
+                          StrokeLineJoin="Round"
+                          StrokeStartLineCap="Round"
+                          Margin="2.5,0,0,0"/>
                         </Button>
 
-                        <Slider Grid.Column="1" Minimum="0" Maximum="100" Value="0" VerticalAlignment="Center" Margin="16,0">
+                        <!-- Slider -->
+                        <Slider Grid.Column="1"
+                        Minimum="0"
+                        Maximum="100"
+                        Value="0"
+                        VerticalAlignment="Center"
+                        Margin="16,0">
+
                             <Slider.Template>
+
                                 <ControlTemplate TargetType="Slider">
+
                                     <Grid VerticalAlignment="Center">
 
-                                        <Border Height="4" Background="#DADCE0" CornerRadius="2" VerticalAlignment="Center"/>
+                                        <!-- Track BG -->
+                                        <Border Height="4"
+                                        Background="#DADCE0"
+                                        CornerRadius="2"
+                                        VerticalAlignment="Center"/>
 
                                         <Track x:Name="PART_Track">
 
+                                            <!-- Filled -->
                                             <Track.DecreaseRepeatButton>
-                                                <RepeatButton Command="{x:Static Slider.DecreaseLarge}">
+                                                <RepeatButton Command="{x:Static Slider.DecreaseLarge}"
+                                                      Focusable="False">
+
                                                     <RepeatButton.Template>
                                                         <ControlTemplate TargetType="RepeatButton">
-                                                            <Border Height="4" Background="#1A73E8" CornerRadius="2,0,0,2" VerticalAlignment="Center"/>
+
+                                                            <Border Height="4"
+                                                            Background="#1A73E8"
+                                                            CornerRadius="2,0,0,2"
+                                                            VerticalAlignment="Center"/>
+
                                                         </ControlTemplate>
                                                     </RepeatButton.Template>
+
                                                 </RepeatButton>
                                             </Track.DecreaseRepeatButton>
 
+                                            <!-- Empty -->
                                             <Track.IncreaseRepeatButton>
-                                                <RepeatButton Command="{x:Static Slider.IncreaseLarge}">
+                                                <RepeatButton Command="{x:Static Slider.IncreaseLarge}"
+                                                      Focusable="False">
+
                                                     <RepeatButton.Template>
                                                         <ControlTemplate TargetType="RepeatButton">
                                                             <Border Background="Transparent"/>
                                                         </ControlTemplate>
                                                     </RepeatButton.Template>
+
                                                 </RepeatButton>
                                             </Track.IncreaseRepeatButton>
 
+                                            <!-- Thumb -->
                                             <Track.Thumb>
-                                                <Thumb>
+
+                                                <Thumb Focusable="False">
+
                                                     <Thumb.Template>
                                                         <ControlTemplate TargetType="Thumb">
-                                                            <Ellipse Width="14" Height="14" Fill="#1A73E8">
+
+                                                            <Ellipse Width="14"
+                                                             Height="14"
+                                                             Fill="#1A73E8">
+
                                                                 <Ellipse.Effect>
-                                                                    <DropShadowEffect BlurRadius="4" ShadowDepth="1" Opacity="0.25" Color="#3C4043"/>
+                                                                    <DropShadowEffect BlurRadius="4"
+                                                                              ShadowDepth="1"
+                                                                              Opacity="0.25"
+                                                                              Color="#3C4043"/>
                                                                 </Ellipse.Effect>
+
                                                             </Ellipse>
+
                                                         </ControlTemplate>
                                                     </Thumb.Template>
+
                                                 </Thumb>
+
                                             </Track.Thumb>
 
                                         </Track>
+
                                     </Grid>
+
                                 </ControlTemplate>
+
                             </Slider.Template>
+
                         </Slider>
 
-                        <TextBlock Grid.Column="2" Text="0%" Foreground="#5F6368" VerticalAlignment="Center" HorizontalAlignment="Right" FontSize="13"/>
+                        <!-- Percent -->
+                        <TextBlock Grid.Column="2"
+                           Text="0%"
+                           Foreground="#5F6368"
+                           VerticalAlignment="Center"
+                           HorizontalAlignment="Right"
+                           FontSize="13"/>
+
                     </Grid>
+
                 </Border>
-                <!--USER-->
-                <Border Grid.Column="2" Width="32" Height="32" Background="#1A73E8" CornerRadius="16">
-                    <TextBlock Text="JD" Foreground="White" FontSize="14" FontWeight="Medium" HorizontalAlignment="Center" VerticalAlignment="Center"/>
-                </Border>
+
+                <!-- Profile -->
+                <Button x:Name="ProfileButton"
+        Grid.Column="2"
+        Width="32"
+        Height="32"
+        Background="Transparent"
+        BorderThickness="0"
+        Cursor="Hand"
+        FocusVisualStyle="{x:Null}"
+        Command="{Binding ToggleProfilePopoverCommand}">
+
+                    <Button.Template>
+
+                        <ControlTemplate TargetType="Button">
+
+                            <Border Width="32"
+                    Height="32"
+                    Background="#1A73E8"
+                    CornerRadius="16">
+
+                                <TextBlock Text="{Binding CurrentUserInitials}"
+                           Foreground="White"
+                           FontSize="14"
+                           FontWeight="Medium"
+                           HorizontalAlignment="Center"
+                           VerticalAlignment="Center"/>
+
+                            </Border>
+
+                        </ControlTemplate>
+
+                    </Button.Template>
+
+                </Button>
 
             </Grid>
-
         </Border>
+
+
 
         <Grid Grid.Row="1">
             <Grid.ColumnDefinitions>
                 <ColumnDefinition Width="*"/>
-                <ColumnDefinition Width="320"/>
+                <ColumnDefinition Width="{Binding RightSidebarWidth}"/>
             </Grid.ColumnDefinitions>
 
             <Grid Grid.Column="0" ClipToBounds="True">
 
-                <!--Thay đổi cấu hình sự kiện và vô hiệu hóa chế độ vẽ nội bộ của InkCanvas -->
-                <InkCanvas x:Name="MyCanvas" Grid.Column="0" 
-                           EditingMode="None"
-                           MouseDown="Canvas_MouseDown" 
-                           MouseUp="Canvas_MouseUp" 
-                           MouseMove="Canvas_MouseMove">
+                <InkCanvas x:Name="MyCanvas"
+                           Grid.Column="0"
+                           EditingMode="{Binding CurrentEditingMode}" 
+                           SnapsToDevicePixels="True"
+                           MouseDown="Canvas_MouseDown"
+                           MouseUp="Canvas_MouseUp"
+                           MouseMove="Canvas_MouseMove" Margin="0,0,-592,0">
+
+
+                    <Ellipse x:Name="EraserCursor" 
+                             IsHitTestVisible="False" 
+                             Width="{Binding Toolbar.CurrentThickness}" 
+                             Height="{Binding Toolbar.CurrentThickness}" 
+                             Stroke="#5F6368" StrokeThickness="1.2" 
+                             Fill="#22808080" Visibility="Collapsed" 
+                             HorizontalAlignment="Left" VerticalAlignment="Top" Panel.ZIndex="999"/>
                     <InkCanvas.Background>
                         <DrawingBrush Viewport="0,0,30,30" ViewportUnits="Absolute" TileMode="Tile" Stretch="None">
                             <DrawingBrush.Drawing>
@@ -350,373 +626,496 @@
                             </DrawingBrush.Drawing>
                         </DrawingBrush>
                     </InkCanvas.Background>
+
+
                 </InkCanvas>
 
                 <Canvas Panel.ZIndex="2" IsHitTestVisible="False">
 
                     <Canvas Canvas.Left="350" Canvas.Top="200"/>
 
-                    <Canvas Canvas.Left="480" Canvas.Top="320"/>
+                    <Canvas Canvas.Left="700" Canvas.Top="320"/>
                 </Canvas>
+  <!-- SIDEBAR -->
+                <Border HorizontalAlignment="Left" VerticalAlignment="Bottom" Margin="20,0,0,20"
+            Background="#FFFFFF"
+            CornerRadius="24"
+            Padding="4,12"
+            Panel.ZIndex="5"
+            Width="52">
 
-                <StackPanel Orientation="Horizontal" HorizontalAlignment="Left" VerticalAlignment="Center" Margin="24,0,0,0" Panel.ZIndex="100">
-                    <Border VerticalAlignment="Center" Margin="24,0,0,0" Background="#FFFFFF" CornerRadius="24" Padding="4,12" Panel.ZIndex="5" Width="52">
+                    <Border.Effect>
+                        <DropShadowEffect BlurRadius="8"
+                              ShadowDepth="2"
+                              Opacity="0.15"
+                              Color="#3C4043"/>
+                    </Border.Effect>
+
+                    <StackPanel Width="40">
+
+                        <!-- MENU -->
+                        <Button Width="40"
+                    Height="40"
+                    Margin="0,0,0,8"
+                    ToolTip="Toggle Sidebar"
+                    Style="{StaticResource VectorToolStyle}"
+                    Command="{Binding ToggleSidebarCommand}">
+
+                            <Path Data="M4 6H20 M4 12H20 M4 18H20"
+                      Stroke="{Binding Foreground, RelativeSource={RelativeSource AncestorType=Button}}"
+                      StrokeThickness="1.5"
+                      Stretch="Uniform"
+                      Width="18"
+                      Height="18"/>
+                        </Button>
+
+                        <!-- SELECT -->
+                        <RadioButton GroupName="Tools"
+                         Width="40"
+                         Height="40"
+                         Margin="0,0,0,8"
+                         ToolTip="Select Tool"
+                         Style="{StaticResource RadioToolStyle}"
+                         Command="{Binding SelectToolCommand}"
+                         CommandParameter="select"
+                         Content="M4.037 4.688a.495.495 0 0 1 .651-.651l16 6.5a.5.5 0 0 1-.063.947l-6.124 1.58a2 2 0 0 0-1.438 1.435l-1.579 6.126a.5.5 0 0 1-.947.063z"/>
+
+                        <!-- PEN -->
+                        <RadioButton x:Name="PenButton"
+               GroupName="Tools"
+               Width="40"
+               Height="40"
+               Margin="0,0,0,8"
+               ToolTip="Pen Tools"
+               Style="{StaticResource RadioToolStyle}"
+               Command="{Binding Toolbar.TogglePopupCommand}"
+               CommandParameter="Pencil"
+               Content="M17 3a2.85 2.83 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5Z M15 5l4 4"
+               Focusable="False"
+               IsChecked="{Binding Toolbar.IsPencilSelected, Mode=TwoWay}"/>
+                        <!-- ERASER -->
+                        <RadioButton x:Name="EraserButton"
+               GroupName="Tools"
+               Width="40"
+               Height="40"
+               Margin="0,0,0,8"
+               ToolTip="Eraser"
+               Style="{StaticResource RadioToolStyle}"
+               Command="{Binding Toolbar.TogglePopupCommand}"
+               CommandParameter="Eraser"
+               Content="M16 3L21 8L9 20H4V15L16 3Z"
+               Focusable="False"
+               IsChecked="{Binding Toolbar.IsEraserSelected, Mode=TwoWay}"/>
+
+                        <!-- SHAPES -->
+                        <RadioButton x:Name="ShapesButton"
+             GroupName="Tools"
+             Width="40"
+             Height="40"
+             Margin="0,0,0,8"
+             ToolTip="Shapes"
+             Style="{StaticResource RadioToolStyle}"
+             Command="{Binding Toolbar.TogglePopupCommand}"
+             CommandParameter="Shape"
+             Content="M5 3h14a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2z"
+             Focusable="False"/>
+                        <!-- TEXT -->
+                        <RadioButton x:Name="TextButton"
+             GroupName="Tools"
+             Width="40"
+             Height="40"
+             Margin="0,0,0,8"
+             ToolTip="Text"
+             Style="{StaticResource RadioToolStyle}"
+             Command="{Binding Toolbar.TogglePopupCommand}"
+             CommandParameter="Text"
+             Content="M4 7V4h16v3 M9 20h6 M12 4v16"
+             Focusable="False"/>
+
+                        <!-- OCR -->
+                        <RadioButton GroupName="ORCButton"
+                         Width="40"
+                         Height="40"
+                         ToolTip="OCR Magic"
+                         Style="{StaticResource RadioToolStyle}"
+                         Command="{Binding Toolbar.TogglePopupCommand}"                      
+                         Content="m21.64 3.64-1.28-1.28a1.21 1.21 0 0 0-1.72 0L2.36 18.64a1.21 1.21 0 0 0 0 1.72l1.28 1.28a1.2 1.2 0 0 0 1.72 0L21.64 5.36a1.2 1.2 0 0 0 0-1.72Z M14 7l3 3 M5 6v4 M19 14v4 M10 2h.01 M20 22h.01 M2 2h.01"
+                         Focusable="False"/>
+                    </StackPanel>
+                </Border>
+
+                <!-- PEN POPUP -->
+                <Popup x:Name="PenPopover"
+       IsOpen="{Binding Toolbar.IsPencilPopupOpen, Mode=TwoWay}"
+       Placement="Right"
+       PlacementTarget="{Binding ElementName=PenButton}"
+       HorizontalOffset="18"
+       AllowsTransparency="True"
+       PopupAnimation="Fade"
+       StaysOpen="False">
+
+                    <Border Width="280"
+            Padding="18"
+            Background="#FFFFFF"
+            CornerRadius="18">
+
                         <Border.Effect>
-                            <DropShadowEffect BlurRadius="8" ShadowDepth="2" Opacity="0.15" Color="#3C4043"/>
+                            <DropShadowEffect BlurRadius="10"
+                              ShadowDepth="2"
+                              Opacity="0.16"
+                              Color="#3C4043"/>
                         </Border.Effect>
-                        <!-- Toolbox -->
-                        <StackPanel Width="40">
-                            <RadioButton GroupName="Tools" Width="40" Height="40" Margin="0,0,0,8" IsChecked="True" ToolTip="Select" Style="{StaticResource RadioToolStyle}"
-                     Content="M4.037 4.688a.495.495 0 0 1 .651-.651l16 6.5a.5.5 0 0 1-.063.947l-6.124 1.58a2 2 0 0 0-1.438 1.435l-1.579 6.126a.5.5 0 0 1-.947.063z"/>
 
-                            <RadioButton GroupName="Tools" Width="40" Height="40" Margin="0,0,0,8" ToolTip="Pen" Style="{StaticResource RadioToolStyle}"
-                                         IsChecked="{Binding IsPenSelected, Mode=TwoWay}"
-                                         Command="{Binding SelectToolCommand}" CommandParameter="pen"
-                     Content="M17 3a2.85 2.83 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5Z M15 5l4 4"/>
+                        <StackPanel>
+                            <TextBlock Text="Tool" FontSize="16" FontWeight="SemiBold" Foreground="#374151"/>
 
-                            <RadioButton GroupName="Tools" Width="40" Height="40" Margin="0,0,0,8" ToolTip="Eraser" Style="{StaticResource RadioToolStyle}"
-                                         IsChecked="{Binding IsEraserSelected, Mode=TwoWay}"
-                                         Command="{Binding SelectToolCommand}" CommandParameter="eraser"
-                     Content="m7 21-4.3-4.3c-1-1-1-2.5 0-3.4l9.6-9.6c1-1 2.5-1 3.4 0l5.6 5.6c1 1 1 2.5 0 3.4L13 21 M22 21H7 M5 11l9 9"/>
+                            <StackPanel Orientation="Horizontal" Margin="0,16,0,20">
+                                <RadioButton Width="48" Height="48" Margin="0,0,10,0" Style="{StaticResource PenTypeRadioStyle}" GroupName="PenTools" Command="{Binding ChangePenTypeCommand}" CommandParameter="Brush" IsChecked="True">
+                                    <TextBlock Text="🖌" FontSize="22" HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                                </RadioButton>
 
-                            <RadioButton GroupName="Tools" Width="40" Height="40" Margin="0,0,0,8" ToolTip="Shapes" Style="{StaticResource RadioToolStyle}"
-                                         IsChecked="{Binding IsShapesSelected, Mode=TwoWay}"
-                                         Command="{Binding SelectToolCommand}" CommandParameter="shapes"
-                     Content="M5 3h14a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2z"/>
+                                <RadioButton Width="48" Height="48" Margin="0,0,10,0" Style="{StaticResource PenTypeRadioStyle}" GroupName="PenTools" Command="{Binding ChangePenTypeCommand}" CommandParameter="Fountain">
+                                    <TextBlock Text="✒" FontSize="22" HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                                </RadioButton>
 
-                            <RadioButton GroupName="Tools" Width="40" Height="40" Margin="0,0,0,8" ToolTip="Text" Style="{StaticResource RadioToolStyle}"
-                                         IsChecked="{Binding IsTextSelected, Mode=TwoWay}"
-             Command="{Binding SelectToolCommand}" CommandParameter="text"
-                     Content="M4 7V4h16v3 M9 20h6 M12 4v16"/>
+                                <RadioButton Width="48" Height="48" Margin="0,0,10,0" Style="{StaticResource PenTypeRadioStyle}" GroupName="PenTools" Command="{Binding ChangePenTypeCommand}" CommandParameter="Highlighter">
+                                    <TextBlock Text="🖍" FontSize="22" HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                                </RadioButton>
 
-                            <RadioButton GroupName="Tools" Width="40" Height="40" ToolTip="OCR Magic" Style="{StaticResource RadioToolStyle}"
-                     Content="m21.64 3.64-1.28-1.28a1.21 1.21 0 0 0-1.72 0L2.36 18.64a1.21 1.21 0 0 0 0 1.72l1.28 1.28a1.2 1.2 0 0 0 1.72 0L21.64 5.36a1.2 1.2 0 0 0 0-1.72Z M14 7l3 3 M5 6v4 M19 14v4 M10 2h.01 M20 22h.01 M2 2h.01"/>
-                        </StackPanel>
-                    </Border>
-                    <Grid>
-                        <!-- 1. POPOVER BÚT -->
-                        <Border x:Name="PenPopover" 
-            Background="#FFFFFF" CornerRadius="12" Margin="12,50,0,0" Padding="16" Width="220"
-            VerticalAlignment="Top"
-            Visibility="{Binding IsPenPopoverVisible, Converter={StaticResource BoolToVis}}"
-            d:Visibility="Hidden" Height="158">
+                                <RadioButton Width="48" Height="48" GroupName="PenTools" Style="{StaticResource PenTypeRadioStyle}" Command="{Binding ChangePenTypeCommand}" CommandParameter="Laser" ToolTip="Laser Pointer">
+                                    <Path Data="M7.5,5.6L5,7L6.4,4.5L5,2L7.5,3.4L10,2L8.6,4.5L10,7L7.5,5.6 M19.5,15.4L22,14L20.6,16.5L22,19L19.5,17.6L17,19L18.4,16.5L17,14L19.5,15.4 M22,2L3.3,20.7L2,19.4L20.7,0.7L22,2Z" 
+                                          Fill="#5F6368" 
+                                          Stretch="Uniform" 
+                                          Width="22" 
+                                          Height="22" 
+                                          HorizontalAlignment="Center" 
+                                          VerticalAlignment="Center"/>
+                                </RadioButton>
 
-                            <Border.Effect>
-                                <DropShadowEffect BlurRadius="6" ShadowDepth="1" Opacity="0.15" Color="#3C4043"/>
-                            </Border.Effect>
+                            </StackPanel>
 
-                            <StackPanel>
-                                <!-- Chọn màu -->
-                                <TextBlock Text="COLOR" FontSize="12" FontWeight="Medium" Foreground="#5F6368" Margin="0,0,0,8"/>
-                                <Button Command="{Binding TogglePaletteCommand}" Style="{StaticResource OutlinedColorButtonStyle}" Background="Transparent" BorderBrush="#DADCE0" BorderThickness="1" Cursor="Hand" Margin="0,0,0,16" Padding="8,4">
-                                    <StackPanel Orientation="Horizontal">
-                                        <Border Width="20" Height="20" Background="#202124" CornerRadius="4" BorderBrush="#DADCE0" BorderThickness="1" Margin="0,0,8,0"/>
-                                        <TextBlock Text="Choose color" Foreground="#5F6368" VerticalAlignment="Center"/>
-                                    </StackPanel>
+                            <TextBlock Text="Size" FontSize="16" FontWeight="SemiBold" Foreground="#374151"/>
+
+                            <StackPanel Orientation="Horizontal" Margin="0,18,0,20">
+                                <StackPanel.Resources>
+                                    <Style x:Key="PenSizeDotRadioStyle" TargetType="RadioButton">
+                                        <Setter Property="Cursor" Value="Hand"/>
+                                        <Setter Property="Margin" Value="0,0,14,0"/>
+                                        <Setter Property="VerticalAlignment" Value="Center"/>
+                                        <Setter Property="Template">
+                                            <Setter.Value>
+                                                <ControlTemplate TargetType="RadioButton">
+                                                    <Grid Width="{TemplateBinding Width}" Height="{TemplateBinding Height}" Background="Transparent">
+                                                        <Ellipse x:Name="OuterBorder" Stroke="Transparent" StrokeThickness="2" Fill="Transparent"/>
+                                                        <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                                                    </Grid>
+                                                    <ControlTemplate.Triggers>
+                                                        <Trigger Property="IsChecked" Value="True">
+                                                            <Setter TargetName="OuterBorder" Property="Stroke" Value="#1A73E8"/>
+                                                        </Trigger>
+                                                    </ControlTemplate.Triggers>
+                                                </ControlTemplate>
+                                            </Setter.Value>
+                                        </Setter>
+                                    </Style>
+                                </StackPanel.Resources>
+
+                                <RadioButton Width="16" Height="16" Style="{StaticResource PenSizeDotRadioStyle}" GroupName="PenSizes" Command="{Binding Toolbar.ChangeSizeCommand}" CommandParameter="2" IsChecked="True">
+                                    <Ellipse Width="6" Height="6" Fill="{Binding Toolbar.CurrentColor, Converter={StaticResource HexToBrushConverter}}"/>
+                                </RadioButton>
+                                <RadioButton Width="20" Height="20" Style="{StaticResource PenSizeDotRadioStyle}" GroupName="PenSizes" Command="{Binding Toolbar.ChangeSizeCommand}" CommandParameter="6">
+                                    <Ellipse Width="10" Height="10" Fill="{Binding Toolbar.CurrentColor, Converter={StaticResource HexToBrushConverter}}"/>
+                                </RadioButton>
+                                <RadioButton Width="24" Height="24" Style="{StaticResource PenSizeDotRadioStyle}" GroupName="PenSizes" Command="{Binding Toolbar.ChangeSizeCommand}" CommandParameter="12">
+                                    <Ellipse Width="14" Height="14" Fill="{Binding Toolbar.CurrentColor, Converter={StaticResource HexToBrushConverter}}"/>
+                                </RadioButton>
+                                <RadioButton Width="28" Height="28" Style="{StaticResource PenSizeDotRadioStyle}" GroupName="PenSizes" Command="{Binding Toolbar.ChangeSizeCommand}" CommandParameter="18">
+                                    <Ellipse Width="18" Height="18" Fill="{Binding Toolbar.CurrentColor, Converter={StaticResource HexToBrushConverter}}"/>
+                                </RadioButton>
+                                <RadioButton Width="32" Height="32" Style="{StaticResource PenSizeDotRadioStyle}" GroupName="PenSizes" Command="{Binding Toolbar.ChangeSizeCommand}" CommandParameter="24">
+                                    <Ellipse Width="22" Height="22" Fill="{Binding Toolbar.CurrentColor, Converter={StaticResource HexToBrushConverter}}"/>
+                                </RadioButton>
+                            </StackPanel>
+
+                            <TextBlock Text="Color" FontSize="16" FontWeight="SemiBold" Foreground="#374151"/>
+
+                            <StackPanel Orientation="Horizontal" Margin="0,18,0,0">
+                                <RadioButton Style="{StaticResource ColorRadioStyle}" Background="#000000" GroupName="PenColors" Command="{Binding Toolbar.ChangeColorCommand}" CommandParameter="#000000" IsChecked="True"/>
+                                <RadioButton Style="{StaticResource ColorRadioStyle}" Background="#22C55E" GroupName="PenColors" Command="{Binding Toolbar.ChangeColorCommand}" CommandParameter="#22C55E"/>
+                                <RadioButton Style="{StaticResource ColorRadioStyle}" Background="#3B82F6" GroupName="PenColors" Command="{Binding Toolbar.ChangeColorCommand}" CommandParameter="#3B82F6"/>
+                                <RadioButton Style="{StaticResource ColorRadioStyle}" Background="#EAB308" GroupName="PenColors" Command="{Binding Toolbar.ChangeColorCommand}" CommandParameter="#EAB308"/>
+                                <RadioButton Style="{StaticResource ColorRadioStyle}" Background="#EF4444" GroupName="PenColors" Command="{Binding Toolbar.ChangeColorCommand}" CommandParameter="#EF4444"/>
+
+                                <ItemsControl ItemsSource="{Binding Toolbar.RecentColors}">
+                                    <ItemsControl.ItemsPanel>
+                                        <ItemsPanelTemplate>
+                                            <StackPanel Orientation="Horizontal"/>
+                                        </ItemsPanelTemplate>
+                                    </ItemsControl.ItemsPanel>
+                                    <ItemsControl.ItemTemplate>
+                                        <DataTemplate>
+                                            <RadioButton Style="{StaticResource ColorRadioStyle}" 
+                                                         Background="{Binding Converter={StaticResource HexToBrushConverter}}" 
+                                                         GroupName="PenColors" 
+                                                         Command="{Binding DataContext.Toolbar.ChangeColorCommand, RelativeSource={RelativeSource AncestorType=ItemsControl}}" 
+                                                         CommandParameter="{Binding}"/>
+                                        </DataTemplate>
+                                    </ItemsControl.ItemTemplate>
+                                </ItemsControl>
+
+                                <Button Width="32" Height="32" Background="Transparent" BorderBrush="#D1D5DB" BorderThickness="1" Cursor="Hand" Click="OpenColorPicker_Click" ToolTip="Add Custom Color">
+                                    <Button.Template>
+                                        <ControlTemplate TargetType="Button">
+                                            <Border CornerRadius="16" BorderBrush="{TemplateBinding BorderBrush}" BorderThickness="{TemplateBinding BorderThickness}" Background="{TemplateBinding Background}">
+                                                <TextBlock Text="+" FontSize="20" HorizontalAlignment="Center" VerticalAlignment="Center" Foreground="#6B7280" Margin="0,-2,0,0"/>
+                                            </Border>
+                                            <ControlTemplate.Triggers>
+                                                <Trigger Property="IsMouseOver" Value="True">
+                                                    <Setter Property="Background" Value="#F3F4F6"/>
+                                                </Trigger>
+                                            </ControlTemplate.Triggers>
+                                        </ControlTemplate>
+                                    </Button.Template>
                                 </Button>
-
-                                <!-- Chọn độ dày -->
-                                <TextBlock Text="THICKNESS" FontSize="12" FontWeight="Medium" Foreground="#5F6368" Margin="0,0,0,8"/>
-                                <Grid>
-                                    <Grid.ColumnDefinitions>
-                                        <ColumnDefinition Width="Auto"/>
-                                        <ColumnDefinition Width="*"/>
-                                        <ColumnDefinition Width="Auto"/>
-                                    </Grid.ColumnDefinitions>
-                                    <Path Grid.Column="0" Data="M0,0 L16,0" Stroke="#5F6368" StrokeThickness="1" VerticalAlignment="Center"/>
-                                    <!-- Binding tới PenThickness -->
-                                    <Slider Grid.Column="1" Minimum="1" Maximum="20" Value="{Binding PenThickness, Mode=TwoWay}" Margin="8,0" Foreground="#1A73E8">
-                                        <!-- Slider -->
-                                        <Slider.Template>
-                                            <ControlTemplate TargetType="Slider">
-                                                <Grid VerticalAlignment="Center">
-                                                    <Border Height="4" Background="#DADCE0" CornerRadius="2" VerticalAlignment="Center"/>
-                                                    <Track x:Name="PART_Track">
-                                                        <Track.DecreaseRepeatButton>
-                                                            <RepeatButton Command="{x:Static Slider.DecreaseLarge}">
-                                                                <RepeatButton.Template>
-                                                                    <ControlTemplate TargetType="RepeatButton">
-                                                                        <Border Height="4" Background="#1A73E8" CornerRadius="2,0,0,2" VerticalAlignment="Center"/>
-                                                                    </ControlTemplate>
-                                                                </RepeatButton.Template>
-                                                            </RepeatButton>
-                                                        </Track.DecreaseRepeatButton>
-                                                        <Track.IncreaseRepeatButton>
-                                                            <RepeatButton Command="{x:Static Slider.IncreaseLarge}">
-                                                                <RepeatButton.Template>
-                                                                    <ControlTemplate TargetType="RepeatButton">
-                                                                        <Border Background="Transparent"/>
-                                                                    </ControlTemplate>
-                                                                </RepeatButton.Template>
-                                                            </RepeatButton>
-                                                        </Track.IncreaseRepeatButton>
-                                                        <Track.Thumb>
-                                                            <Thumb>
-                                                                <Thumb.Template>
-                                                                    <ControlTemplate TargetType="Thumb">
-                                                                        <Ellipse Width="14" Height="14" Fill="#1A73E8">
-                                                                            <Ellipse.Effect>
-                                                                                <DropShadowEffect BlurRadius="4" ShadowDepth="1" Opacity="0.25" Color="#3C4043"/>
-                                                                            </Ellipse.Effect>
-                                                                        </Ellipse>
-                                                                    </ControlTemplate>
-                                                                </Thumb.Template>
-                                                            </Thumb>
-                                                        </Track.Thumb>
-                                                    </Track>
-                                                </Grid>
-                                            </ControlTemplate>
-                                        </Slider.Template>
-                                    </Slider>
-                                    <Path Grid.Column="2" Data="M0,0 L18,0" Stroke="#5F6368" StrokeThickness="4" VerticalAlignment="Center"/>
-                                </Grid>
                             </StackPanel>
-                        </Border>
-                        <!-- 2. POPOVER TẨY -->
-                        <Border x:Name="EraserPopover" 
-                    Background="#FFFFFF" CornerRadius="12" Margin="12,98,0,0" Padding="16" Width="220" Height="88"
-                    VerticalAlignment="Top"
-                    Visibility="{Binding IsEraserPopoverVisible, Converter={StaticResource BoolToVis}}"
-                    d:Visibility="Hidden">
-                            <Border.Effect>
-                                <DropShadowEffect BlurRadius="6" ShadowDepth="1" Opacity="0.15" Color="#3C4043"/>
-                            </Border.Effect>
+                        </StackPanel>
 
-                            <StackPanel>
-                                <TextBlock Text="THICKNESS" FontSize="12" FontWeight="Medium" Foreground="#5F6368" Margin="0,0,0,8"/>
-                                <Grid Margin="0,8,0,0">
-                                    <Grid.ColumnDefinitions>
-                                        <ColumnDefinition Width="Auto"/>
-                                        <ColumnDefinition Width="*"/>
-                                        <ColumnDefinition Width="Auto"/>
-                                    </Grid.ColumnDefinitions>
+                    </Border>
 
-                                    <Rectangle Grid.Column="0" Width="16" Height="1.5" Fill="#5F6368" VerticalAlignment="Center" Margin="0,0,8,0"/>
-                                    <Slider Grid.Column="1" Minimum="1" Maximum="30" Value="{Binding EraserThickness, Mode=TwoWay}" Foreground="#1A73E8">
-                                        <Slider.Template>
-                                            <ControlTemplate TargetType="Slider">
-                                                <Grid VerticalAlignment="Center">
-                                                    <Border Height="4" Background="#DADCE0" CornerRadius="2" VerticalAlignment="Center"/>
-                                                    <Track x:Name="PART_Track">
-                                                        <Track.DecreaseRepeatButton>
-                                                            <RepeatButton Command="{x:Static Slider.DecreaseLarge}">
-                                                                <RepeatButton.Template>
-                                                                    <ControlTemplate TargetType="RepeatButton">
-                                                                        <Border Height="4" Background="#1A73E8" CornerRadius="2,0,0,2" VerticalAlignment="Center"/>
-                                                                    </ControlTemplate>
-                                                                </RepeatButton.Template>
-                                                            </RepeatButton>
-                                                        </Track.DecreaseRepeatButton>
-                                                        <Track.IncreaseRepeatButton>
-                                                            <RepeatButton Command="{x:Static Slider.IncreaseLarge}">
-                                                                <RepeatButton.Template>
-                                                                    <ControlTemplate TargetType="RepeatButton">
-                                                                        <Border Background="Transparent"/>
-                                                                    </ControlTemplate>
-                                                                </RepeatButton.Template>
-                                                            </RepeatButton>
-                                                        </Track.IncreaseRepeatButton>
-                                                        <Track.Thumb>
-                                                            <Thumb>
-                                                                <Thumb.Template>
-                                                                    <ControlTemplate TargetType="Thumb">
-                                                                        <Ellipse Width="14" Height="14" Fill="#1A73E8">
-                                                                            <Ellipse.Effect>
-                                                                                <DropShadowEffect BlurRadius="4" ShadowDepth="1" Opacity="0.25" Color="#3C4043"/>
-                                                                            </Ellipse.Effect>
-                                                                        </Ellipse>
-                                                                    </ControlTemplate>
-                                                                </Thumb.Template>
-                                                            </Thumb>
-                                                        </Track.Thumb>
-                                                    </Track>
-                                                </Grid>
-                                            </ControlTemplate>
-                                        </Slider.Template>
-                                    </Slider>
+                </Popup>
+                <!--eraser-->
 
-                                    <Rectangle Grid.Column="2" Width="16" Height="10" Fill="#5F6368" RadiusX="2" RadiusY="2" VerticalAlignment="Center" Margin="8,0,0,0"/>
-                                </Grid>
+                <Popup x:Name="EraserPopover"
+       IsOpen="{Binding Toolbar.IsEraserPopupOpen, Mode=TwoWay}"
+       Placement="Right"
+       PlacementTarget="{Binding ElementName=EraserButton}"
+       HorizontalOffset="18"
+       AllowsTransparency="True"
+       PopupAnimation="Fade"
+       StaysOpen="False">
+
+                    <Border Background="#FFFFFF"
+            CornerRadius="12"
+            Padding="16"
+            Width="220">
+
+                        <Border.Effect>
+                            <DropShadowEffect BlurRadius="6"
+                              ShadowDepth="1"
+                              Opacity="0.15"
+                              Color="#3C4043"/>
+                        </Border.Effect>
+
+                        <StackPanel>
+
+                            <TextBlock Text="SIZE"
+                       FontSize="12"
+                       FontWeight="Medium"
+                       Foreground="#5F6368"
+                       Margin="0,0,0,8"/>
+
+                            <StackPanel Orientation="Horizontal"
+                        HorizontalAlignment="Left"
+                        VerticalAlignment="Center"
+                        Margin="0,8,0,0">
+
+                                <RadioButton GroupName="EraserSizeGroup"
+                             Tag="4"
+                             FontSize="6"
+                             Style="{StaticResource SizeDotRadioStyle}"
+                             Command="{Binding Toolbar.ChangeSizeCommand}"
+                             CommandParameter="4"/>
+
+                                <RadioButton GroupName="EraserSizeGroup"
+                             Tag="10"
+                             FontSize="10"
+                             Style="{StaticResource SizeDotRadioStyle}"
+                             Command="{Binding Toolbar.ChangeSizeCommand}"
+                             CommandParameter="10"/>
+
+                                <RadioButton GroupName="EraserSizeGroup"
+                             Tag="16"
+                             IsChecked="True"
+                             FontSize="15"
+                             Style="{StaticResource SizeDotRadioStyle}"
+                             Command="{Binding Toolbar.ChangeSizeCommand}"
+                             CommandParameter="16"/>
+
+                                <RadioButton GroupName="EraserSizeGroup"
+                             Tag="24"
+                             FontSize="20"
+                             Style="{StaticResource SizeDotRadioStyle}"
+                             Command="{Binding Toolbar.ChangeSizeCommand}"
+                             CommandParameter="24"/>
+
+                                <RadioButton GroupName="EraserSizeGroup"
+                             Tag="32"
+                             FontSize="25"
+                             Style="{StaticResource SizeDotRadioStyle}"
+                             Command="{Binding Toolbar.ChangeSizeCommand}"
+                             CommandParameter="32"/>
+
                             </StackPanel>
-                        </Border>
-                        <!-- 3. POPOVER HÌNH KHỐI -->
-                        <Border x:Name="ShapesPopover" 
-                    Background="#FFFFFF" CornerRadius="12" Margin="12,85,0,0" Padding="16" Width="220" Height="241"
-                    VerticalAlignment="Top"
-                    Visibility="{Binding IsShapesPopoverVisible, Converter={StaticResource BoolToVis}}"
-                    d:Visibility="Hidden">
-                            <Border.Effect>
-                                <DropShadowEffect BlurRadius="6" ShadowDepth="1" Opacity="0.15" Color="#3C4043"/>
-                            </Border.Effect>
 
-                            <StackPanel>
-                                <!-- KHU VỰC 1: Chọn Loại Hình (Shape) -->
-                                <TextBlock Text="SHAPE" FontSize="12" FontWeight="Medium" Foreground="#5F6368" Margin="0,0,0,8"/>
-                                <StackPanel Orientation="Horizontal" Margin="0,0,0,16">
+                            <Rectangle Height="1"
+                       Fill="#BFC5CD"
+                       Margin="0,16,0,8"/>
 
-                                    <!-- Vuông -->
-                                    <RadioButton GroupName="ShapeTypes" Width="36" Height="36" Margin="0,0,4,0" IsChecked="True" ToolTip="Rectangle" 
-                 Style="{StaticResource RadioToolStyle}"
-                 Command="{Binding SelectShapeCommand}" CommandParameter="rectangle"
-                 Content="M 4 4 L 20 4 L 20 20 L 4 20 Z"/>
+                            <Button Command="{Binding ClearCanvasCommand}"
+                    Background="Transparent"
+                    BorderThickness="0"
+                    Cursor="Hand"
+                    HorizontalAlignment="Left">
 
-                                    <!-- Tròn -->
-                                    <RadioButton GroupName="ShapeTypes" Width="36" Height="36" Margin="0,0,4,0" ToolTip="Circle" 
-                 Style="{StaticResource RadioToolStyle}"
-                 Command="{Binding SelectShapeCommand}" CommandParameter="circle"
-                 Content="M 12 2 A 10 10 0 1 1 12 22 A 10 10 0 1 1 12 2 Z"/>
+                                <StackPanel Orientation="Horizontal"
+                            Margin="4">
 
-                                    <!-- Tam giác -->
-                                    <RadioButton GroupName="ShapeTypes" Width="36" Height="36" Margin="0,0,4,0" ToolTip="Triangle" 
-                 Style="{StaticResource RadioToolStyle}"
-                 Command="{Binding SelectShapeCommand}" CommandParameter="triangle"
-                 Content="M 12 2 L 22 20 L 2 20 Z"/>
+                                    <Path Data="M19,4H15.5L14.5,3H9.5L8.5,4H5V6H19M6,19A2,2 0 0,0 8,21H16A2,2 0 0,0 18,19V7H6V19Z"
+                          Fill="#D93025"
+                          Width="18"
+                          Height="18"
+                          Stretch="Uniform"
+                          Margin="0,0,8,0"/>
 
-                                    <!-- Đường thẳng -->
-                                    <RadioButton GroupName="ShapeTypes" Width="36" Height="36" ToolTip="Line" 
-                 Style="{StaticResource RadioToolStyle}"
-                 Command="{Binding SelectShapeCommand}" CommandParameter="line"
-                 Content="M 2 12 L 22 12"/>
+                                    <TextBlock Text="Clear canvas"
+                               Foreground="#D93025"
+                               VerticalAlignment="Center"
+                               FontWeight="Medium"
+                               FontSize="13"/>
 
                                 </StackPanel>
 
-                                <!-- KHU VỰC 2: Chọn Màu Nền (Fill) và Màu Viền (Stroke) -->
-                                <Grid>
-                                    <Grid.ColumnDefinitions>
-                                        <!-- Chia đều 2 ô màu ra 2 bên, cách nhau 12px -->
-                                        <ColumnDefinition Width="*"/>
-                                        <ColumnDefinition Width="12"/>
-                                        <ColumnDefinition Width="*"/>
-                                    </Grid.ColumnDefinitions>
+                            </Button>
 
-                                    <!-- FILL (Màu nền) -->
-                                    <StackPanel Grid.Column="0">
-                                        <TextBlock Text="FILL" FontSize="12" FontWeight="Medium" Foreground="#5F6368" Margin="0,0,0,8"/>
-                                        <Button Command="{Binding ToggleShapeFillPaletteCommand}" Style="{StaticResource OutlinedColorButtonStyle}" Background="Transparent" BorderBrush="#DADCE0" BorderThickness="1" Cursor="Hand" Padding="5" HorizontalContentAlignment="Stretch">
-                                            <!-- TODO: Bind Background tới thuộc tính ShapeFillColor trong ViewModel -->
-                                            <Border Height="20" Background="#FF1AE8C3" CornerRadius="4" BorderBrush="#DADCE0" BorderThickness="0" SnapsToDevicePixels="True"/>
-                                        </Button>
-                                    </StackPanel>
+                        </StackPanel>
 
-                                    <!-- STROKE (Màu viền) -->
-                                    <StackPanel Grid.Column="2">
-                                        <TextBlock Text="STROKE" FontSize="12" FontWeight="Medium" Foreground="#5F6368" Margin="0,0,0,8" />
-                                        <Button Command="{Binding ToggleShapeStrokePaletteCommand}" Style="{StaticResource OutlinedColorButtonStyle}" Background="Transparent" BorderBrush="#DADCE0" BorderThickness="1" Cursor="Hand" Padding="5" HorizontalContentAlignment="Stretch">
-                                            <!-- TODO: Bind Background tới thuộc tính ShapeStrokeColor trong ViewModel -->
-                                            <Border Height="20" Background="#202124" CornerRadius="4" BorderBrush="#DADCE0" BorderThickness="0" SnapsToDevicePixels="True"/>
-                                        </Button>
-                                    </StackPanel>
-                                </Grid>
+                    </Border>
 
-                                <TextBlock Text="THICKNESS" FontSize="12" FontWeight="Medium" Foreground="#5F6368" Margin="0,16,0,16"/>
-                                <Grid>
-                                    <Grid.ColumnDefinitions>
-                                        <ColumnDefinition Width="Auto"/>
-                                        <ColumnDefinition Width="*"/>
-                                        <ColumnDefinition Width="Auto"/>
-                                    </Grid.ColumnDefinitions>
-                                    <Path Grid.Column="0" Data="M0,0 L16,0" Stroke="#5F6368" StrokeThickness="1" VerticalAlignment="Center"/>
-                                    <Slider Grid.Column="1" Minimum="1" Maximum="20" Value="{Binding PenThickness, Mode=TwoWay}" Margin="8,0" Foreground="#1A73E8">
-                                        <!-- Slider -->
-                                        <Slider.Template>
-                                            <ControlTemplate TargetType="Slider">
-                                                <Grid VerticalAlignment="Center">
-                                                    <Border Height="4" Background="#DADCE0" CornerRadius="2" VerticalAlignment="Center"/>
-                                                    <Track x:Name="PART_Track">
-                                                        <Track.DecreaseRepeatButton>
-                                                            <RepeatButton Command="{x:Static Slider.DecreaseLarge}">
-                                                                <RepeatButton.Template>
-                                                                    <ControlTemplate TargetType="RepeatButton">
-                                                                        <Border Height="4" Background="#1A73E8" CornerRadius="2,0,0,2" VerticalAlignment="Center"/>
-                                                                    </ControlTemplate>
-                                                                </RepeatButton.Template>
-                                                            </RepeatButton>
-                                                        </Track.DecreaseRepeatButton>
-                                                        <Track.IncreaseRepeatButton>
-                                                            <RepeatButton Command="{x:Static Slider.IncreaseLarge}">
-                                                                <RepeatButton.Template>
-                                                                    <ControlTemplate TargetType="RepeatButton">
-                                                                        <Border Background="Transparent"/>
-                                                                    </ControlTemplate>
-                                                                </RepeatButton.Template>
-                                                            </RepeatButton>
-                                                        </Track.IncreaseRepeatButton>
-                                                        <Track.Thumb>
-                                                            <Thumb>
-                                                                <Thumb.Template>
-                                                                    <ControlTemplate TargetType="Thumb">
-                                                                        <Ellipse Width="14" Height="14" Fill="#1A73E8">
-                                                                            <Ellipse.Effect>
-                                                                                <DropShadowEffect BlurRadius="4" ShadowDepth="1" Opacity="0.25" Color="#3C4043"/>
-                                                                            </Ellipse.Effect>
-                                                                        </Ellipse>
-                                                                    </ControlTemplate>
-                                                                </Thumb.Template>
-                                                            </Thumb>
-                                                        </Track.Thumb>
-                                                    </Track>
-                                                </Grid>
-                                            </ControlTemplate>
-                                        </Slider.Template>
-                                    </Slider>
-                                    <Path Grid.Column="2" Data="M0,0 L18,0" Stroke="#5F6368" StrokeThickness="4" VerticalAlignment="Center"/>
-                                </Grid>
+                </Popup>
+                <!--shapes-->
+                <Popup x:Name="ShapesPopover"
+                           IsOpen="{Binding Toolbar.IsShapePopupOpen, Mode=TwoWay}"
+                           Placement="Right"
+                           PlacementTarget="{Binding ElementName=ShapesButton}"
+                           HorizontalOffset="18"
+                           AllowsTransparency="True"
+                           PopupAnimation="Fade"
+                           StaysOpen="False">
+
+                    <Border 
+                            Background="#FFFFFF" CornerRadius="12" Margin="12,85,0,0" Padding="16" Width="220" Height="241"
+                            VerticalAlignment="Top"
+                            Visibility="{Binding IsShapesPopoverVisible, Converter={StaticResource BoolToVis}}"
+                            d:Visibility="Hidden">
+                        <Border.Effect>
+                            <DropShadowEffect BlurRadius="6" ShadowDepth="1" Opacity="0.15" Color="#3C4043"/>
+                        </Border.Effect>
+
+                        <StackPanel>
+                            <TextBlock Text="SHAPE" FontSize="12" FontWeight="Medium" Foreground="#5F6368" Margin="0,0,0,8"/>
+                            <StackPanel Orientation="Horizontal" Margin="0,0,0,16">
+
+                                <RadioButton GroupName="ShapeTypes" Width="36" Height="36" Margin="0,0,4,0" IsChecked="True" ToolTip="Rectangle" 
+                                                 Style="{StaticResource RadioToolStyle}"
+                                                 Command="{Binding SelectShapeCommand}" CommandParameter="rectangle"
+                                                 Content="M 4 4 L 20 4 L 20 20 L 4 20 Z"/>
+
+                                <RadioButton GroupName="ShapeTypes" Width="36" Height="36" Margin="0,0,4,0" ToolTip="Circle" 
+                                                 Style="{StaticResource RadioToolStyle}"
+                                                 Command="{Binding SelectShapeCommand}" CommandParameter="circle"
+                                                 Content="M 12 2 A 10 10 0 1 1 12 22 A 10 10 0 1 1 12 2 Z"/>
+
+                                <RadioButton GroupName="ShapeTypes" Width="36" Height="36" Margin="0,0,4,0" ToolTip="Triangle" 
+                                         Style="{StaticResource RadioToolStyle}"
+                                         Command="{Binding SelectShapeCommand}" CommandParameter="triangle"
+                                         Content="M 12 2 L 22 20 L 2 20 Z"/>
+
+                                <RadioButton GroupName="ShapeTypes" Width="36" Height="36" ToolTip="Line" 
+                                         Style="{StaticResource RadioToolStyle}"
+                                         Command="{Binding SelectShapeCommand}" CommandParameter="line"
+                                         Content="M 2 12 L 22 12"/>
 
                             </StackPanel>
-                        </Border>
-                        <!-- 4. POPOVER VĂN BẢN -->
-                        <Border x:Name="TextPopover" 
-                    Background="#FFFFFF" CornerRadius="12" Margin="12,194,0,0" Padding="16" Width="220"
+
+                            <Grid>
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="*"/>
+                                    <ColumnDefinition Width="12"/>
+                                    <ColumnDefinition Width="*"/>
+                                </Grid.ColumnDefinitions>
+
+                                <StackPanel Grid.Column="0">
+                                    <TextBlock Text="FILL" FontSize="12" FontWeight="Medium" Foreground="#5F6368" Margin="0,0,0,8"/>
+                                    <Button Command="{Binding ToggleShapeFillPaletteCommand}" Style="{StaticResource OutlinedColorButtonStyle}" Background="Transparent" BorderBrush="#DADCE0" BorderThickness="1" Cursor="Hand" Padding="5" HorizontalContentAlignment="Stretch">
+                                        <Border Height="20" Background="#FF1AE8C3" CornerRadius="4" BorderBrush="#DADCE0" BorderThickness="0" SnapsToDevicePixels="True"/>
+                                    </Button>
+                                </StackPanel>
+
+                                <StackPanel Grid.Column="2">
+                                    <TextBlock Text="STROKE" FontSize="12" FontWeight="Medium" Foreground="#5F6368" Margin="0,0,0,8" />
+                                    <Button Command="{Binding ChooseColorCommand}" Style="{StaticResource OutlinedColorButtonStyle}" Background="Transparent" BorderBrush="#DADCE0" BorderThickness="1" Cursor="Hand" Padding="5" HorizontalContentAlignment="Stretch">
+                                        <Border Height="20" Background="{Binding CurrentColor, Converter={StaticResource HexToBrushConverter}}" CornerRadius="4" BorderBrush="#DADCE0" BorderThickness="0" SnapsToDevicePixels="True"/>
+                                    </Button>
+                                </StackPanel>
+                            </Grid>
+
+                            <TextBlock Text="SIZE" FontSize="12" FontWeight="Medium" Foreground="#5F6368" Margin="0,16,0,8"/>
+                            <StackPanel Orientation="Horizontal" HorizontalAlignment="Left">
+                                <RadioButton GroupName="ShapeSizeGroup" Tag="2" Style="{StaticResource SizeDotRadioStyle}" Command="{Binding ChangeThicknessCommand}" CommandParameter="2"/>
+                                <RadioButton GroupName="ShapeSizeGroup" Tag="6" IsChecked="True" Style="{StaticResource SizeDotRadioStyle}" Command="{Binding ChangeThicknessCommand}" CommandParameter="6"/>
+                                <RadioButton GroupName="ShapeSizeGroup" Tag="12" Style="{StaticResource SizeDotRadioStyle}" Command="{Binding ChangeThicknessCommand}" CommandParameter="12"/>
+                                <RadioButton GroupName="ShapeSizeGroup" Tag="18" Style="{StaticResource SizeDotRadioStyle}" Command="{Binding ChangeThicknessCommand}" CommandParameter="18"/>
+                                <RadioButton GroupName="ShapeSizeGroup" Tag="24" Style="{StaticResource SizeDotRadioStyle}" Command="{Binding ChangeThicknessCommand}" CommandParameter="24"/>
+                            </StackPanel>
+
+                  
+
+                <Border x:Name="TextPopover" 
+                    Background="#FFFFFF" CornerRadius="12" Margin="622,242,-242,0" Padding="16" Width="220"
                     VerticalAlignment="Top"
                     Visibility="{Binding IsTextPopoverVisible, Converter={StaticResource BoolToVis}}"
                     d:Visibility="Visible">
-                            <Border.Effect>
-                                <DropShadowEffect BlurRadius="6" ShadowDepth="1" Opacity="0.15" Color="#3C4043"/>
-                            </Border.Effect>
+                    <Border.Effect>
+                        <DropShadowEffect BlurRadius="6" ShadowDepth="1" Opacity="0.15" Color="#3C4043"/>
+                    </Border.Effect>
 
-                            <StackPanel>
-                                <!-- Font Family -->
-                                <TextBlock Text="FONT FAMILY" FontSize="12" FontWeight="Medium" Foreground="#5F6368" Margin="0,0,0,8"/>
+                    <StackPanel>
+                        <TextBlock Text="FONT FAMILY" FontSize="12" FontWeight="Medium" Foreground="#5F6368" Margin="0,0,0,8"/>
 
-                                <!-- COMBOBOX GIAO DIỆN MỚI -->
-                                <ComboBox SelectedIndex="0" Margin="0,0,0,16" 
+                        <ComboBox SelectedIndex="0" Margin="0,0,0,16" 
                               Style="{StaticResource MaterialComboBoxStyle}" 
                               ItemContainerStyle="{StaticResource MaterialComboBoxItemStyle}">
-                                    <ComboBoxItem Content="Roboto"/>
-                                    <ComboBoxItem Content="Inter"/>
-                                    <ComboBoxItem Content="Arial"/>
-                                    <ComboBoxItem Content="Georgia"/>
-                                </ComboBox>
+                            <ComboBoxItem Content="Roboto"/>
+                            <ComboBoxItem Content="Inter"/>
+                            <ComboBoxItem Content="Arial"/>
+                            <ComboBoxItem Content="Georgia"/>
+                        </ComboBox>
 
-                                <!-- Font Size -->
-                                <TextBlock Text="FONT SIZE" FontSize="12" FontWeight="Medium" Foreground="#5F6368" Margin="0,0,0,8"/>
+                        <TextBlock Text="FONT SIZE" FontSize="12" FontWeight="Medium" Foreground="#5F6368" Margin="0,0,0,8"/>
 
-                                <!-- COMBOBOX GIAO DIỆN MỚI -->
-                                <ComboBox SelectedIndex="2" Margin="0,0,0,16" 
+                        <ComboBox SelectedIndex="2" Margin="0,0,0,16" 
                               Style="{StaticResource MaterialComboBoxStyle}" 
                               ItemContainerStyle="{StaticResource MaterialComboBoxItemStyle}">
-                                    <ComboBoxItem Content="12pt"/>
-                                    <ComboBoxItem Content="14pt"/>
-                                    <ComboBoxItem Content="16pt"/>
-                                    <ComboBoxItem Content="24pt"/>
-                                </ComboBox>
+                            <ComboBoxItem Content="12pt"/>
+                            <ComboBoxItem Content="14pt"/>
+                            <ComboBoxItem Content="16pt"/>
+                            <ComboBoxItem Content="24pt"/>
+                        </ComboBox>
 
-                                <!-- Text Color -->
-                                <TextBlock Text="TEXT COLOR" FontSize="12" FontWeight="Medium" Foreground="#5F6368" Margin="0,0,0,8"/>
+                        <TextBlock Text="TEXT COLOR" FontSize="12" FontWeight="Medium" Foreground="#5F6368" Margin="0,0,0,8"/>
 
-                                <Button Command="{Binding ToggleTextColorPaletteCommand}" Style="{StaticResource OutlinedColorButtonStyle}">
-                                    <StackPanel Orientation="Horizontal">
-                                        <!-- Khối vuông hiển thị màu -->
-                                        <!-- TODO: Bind Background tới TextColor -->
-                                        <Border Width="20" Height="20" Background="#202124" CornerRadius="4" BorderBrush="#DADCE0" BorderThickness="0" Margin="0,0,8,0" SnapsToDevicePixels="True"/>
+                        <Button Command="{Binding ChooseColorCommand}" Style="{StaticResource OutlinedColorButtonStyle}">
+                            <StackPanel Orientation="Horizontal">
+                                <Border Width="20" Height="20" Background="{Binding CurrentColor, Converter={StaticResource HexToBrushConverter}}" CornerRadius="4" BorderBrush="#DADCE0" BorderThickness="0" Margin="0,0,8,0" SnapsToDevicePixels="True"/>
 
-                                        <TextBlock Text="Choose color" Foreground="#5F6368" VerticalAlignment="Center" FontSize="13"/>
-                                    </StackPanel>
-                                </Button>
+                                <TextBlock Text="Choose color" Foreground="#5F6368" VerticalAlignment="Center" FontSize="13"/>
                             </StackPanel>
-                        </Border>
-                    </Grid>
-                </StackPanel>
+                        </Button>
+                    </StackPanel>
+                </Border>      </StackPanel>
+                    </Border>
+                </Popup>
+                <!--text-->
             </Grid>
 
             <Border Grid.Column="1" Background="#FFFFFF" BorderBrush="#E8EAED" BorderThickness="1,0,0,0" Panel.ZIndex="10">
@@ -804,9 +1203,9 @@
                 </Grid>
             </Border>
         </Grid>
-        <!-- ================= OCR TOAST NOTIFICATION ================= -->
-        <Border HorizontalAlignment="Center" VerticalAlignment="Bottom" 
-                Margin="0,0,0,40" Padding="24,12" MinWidth="220" 
+
+        <Border HorizontalAlignment="Center" VerticalAlignment="Top" 
+                Margin="0,647,0,0" Padding="24,12" MinWidth="220" 
                 Background="#202124" CornerRadius="22" Panel.ZIndex="999"
                 Visibility="{Binding IsOcrToastVisible, Converter={StaticResource BoolToVis}}"
                 d:Visibility="Visible" Grid.Row="1" Width="284" Height="53">
@@ -819,55 +1218,154 @@
                                Foreground="#FFFFFF" FontSize="14" 
                                HorizontalAlignment="Left" VerticalAlignment="Center" Margin="4,0,0,0"/>
         </Border>
-        <!-- ================= POPOVER PROFILE / LOG OUT ================= -->
-        <Border x:Name="ProfilePopover"
-                Background="#FFFFFF" CornerRadius="8" MinWidth="160"
-                HorizontalAlignment="Right" VerticalAlignment="Top" 
-                Margin="0,52,24,0" Padding="0"
-            Panel.ZIndex="1000"
-                Visibility="{Binding IsProfilePopoverVisible, Converter={StaticResource BoolToVis}}"
-                d:Visibility="Visible" Grid.RowSpan="2" Height="50" Width="180">
+        <Popup x:Name="ProfilePopover"
+       IsOpen="{Binding IsProfilePopoverVisible}"
+       Placement="Bottom"
+       PlacementTarget="{Binding ElementName=ProfileButton}"
+       VerticalOffset="12"
+       AllowsTransparency="True"
+       PopupAnimation="Fade"
+       StaysOpen="False">
 
-            <Border.Effect>
-                <DropShadowEffect BlurRadius="8" ShadowDepth="2" Opacity="0.15" Color="#3C4043"/>
-            </Border.Effect>
+            <Border PreviewMouseDown="ProfilePopover_PreviewMouseDown"
+            Background="#FFFFFF"
+            CornerRadius="8"
+            MinWidth="160"
+            Padding="0"
+            Width="200"
+            Height="100">
 
-            <StackPanel>
-                <Button Command="{Binding LogoutCommand}" Background="Transparent" BorderThickness="0" Cursor="Hand" HorizontalContentAlignment="Stretch" Height="50">
-                    <Button.Template>
-                        <ControlTemplate TargetType="Button">
-                            <Border x:Name="bgBorder" Background="{TemplateBinding Background}" Padding="16,12" CornerRadius="8" SnapsToDevicePixels="True">
-                                <Grid>
-                                    <Grid.ColumnDefinitions>
-                                        <ColumnDefinition Width="36"/>
-                                        <ColumnDefinition Width="*"/>
-                                    </Grid.ColumnDefinitions>
+                <Border.Effect>
+                    <DropShadowEffect BlurRadius="8"
+                              ShadowDepth="2"
+                              Opacity="0.15"
+                              Color="#3C4043"/>
+                </Border.Effect>
 
-                                    <Path Grid.Column="0" 
-                                          Data="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4 M16 17l5-5-5-5 M21 12H9" 
-                                          Stroke="#5F6368" StrokeThickness="1.5" 
-                                          StrokeStartLineCap="Round" StrokeEndLineCap="Round" StrokeLineJoin="Round"
-                                          Fill="Transparent" 
-                                          Width="18" Height="18" Stretch="Uniform" Margin="9,4,9,4"/>
+                <StackPanel>
 
-                                    <TextBlock Grid.Column="1" 
-                                               Text="Log out" 
-                                               FontSize="14" 
-                                               FontWeight="Regular"
-                                               Foreground="#202124" Margin="10,0,0,0"
-                                               VerticalAlignment="Center"/>
-                                </Grid>
-                            </Border>
+                    <Button Command="{Binding AccountManagerCommand}"
+                    Background="Transparent"
+                    BorderThickness="0"
+                    Cursor="Hand"
+                    HorizontalContentAlignment="Stretch"
+                    Height="50">
 
-                            <ControlTemplate.Triggers>
-                                <Trigger Property="IsMouseOver" Value="True">
-                                    <Setter TargetName="bgBorder" Property="Background" Value="#F8F9FA"/>
-                                </Trigger>
-                            </ControlTemplate.Triggers>
-                        </ControlTemplate>
-                    </Button.Template>
-                </Button>
-            </StackPanel>
-        </Border>
+                        <Button.Template>
+                            <ControlTemplate TargetType="Button">
+
+                                <Border x:Name="bgBorder1"
+                                Background="{TemplateBinding Background}"
+                                Padding="16,12"
+                                CornerRadius="8,8,0,0">
+
+                                    <Grid>
+                                        <Grid.ColumnDefinitions>
+                                            <ColumnDefinition Width="36"/>
+                                            <ColumnDefinition Width="*"/>
+                                        </Grid.ColumnDefinitions>
+
+                                        <Path Grid.Column="0"
+                                      Data="M12 12a5 5 0 1 0 0-10 5 5 0 0 0 0 10z M4 22a8 8 0 0 1 16 0"
+                                      Stroke="#5F6368"
+                                      StrokeThickness="1.5"
+                                      StrokeStartLineCap="Round"
+                                      StrokeEndLineCap="Round"
+                                      StrokeLineJoin="Round"
+                                      Fill="Transparent"
+                                      Width="18"
+                                      Height="18"
+                                      Stretch="Uniform"
+                                      Margin="9,4,9,4"/>
+
+                                        <TextBlock Grid.Column="1"
+                                           Text="Account manager"
+                                           FontSize="14"
+                                           Foreground="#202124"
+                                           Margin="10,0,0,0"
+                                           VerticalAlignment="Center"/>
+                                    </Grid>
+                                </Border>
+
+                                <ControlTemplate.Triggers>
+                                    <Trigger Property="IsMouseOver"
+                                     Value="True">
+
+                                        <Setter TargetName="bgBorder1"
+                                        Property="Background"
+                                        Value="#F8F9FA"/>
+                                    </Trigger>
+                                </ControlTemplate.Triggers>
+
+                            </ControlTemplate>
+                        </Button.Template>
+                    </Button>
+
+                    <Button Command="{Binding LogoutCommand}"
+                    Background="Transparent"
+                    BorderThickness="0"
+                    Cursor="Hand"
+                    HorizontalContentAlignment="Stretch"
+                    Height="50">
+
+                        <Button.Template>
+                            <ControlTemplate TargetType="Button">
+
+                                <Border x:Name="bgBorder"
+                                Background="{TemplateBinding Background}"
+                                Padding="16,12"
+                                CornerRadius="0,0,8,8"
+                                SnapsToDevicePixels="True">
+
+                                    <Grid>
+                                        <Grid.ColumnDefinitions>
+                                            <ColumnDefinition Width="36"/>
+                                            <ColumnDefinition Width="*"/>
+                                        </Grid.ColumnDefinitions>
+
+                                        <Path Grid.Column="0"
+                                      Data="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4 M16 17l5-5-5-5 M21 12H9"
+                                      Stroke="#5F6368"
+                                      StrokeThickness="1.5"
+                                      StrokeStartLineCap="Round"
+                                      StrokeEndLineCap="Round"
+                                      StrokeLineJoin="Round"
+                                      Fill="Transparent"
+                                      Width="18"
+                                      Height="18"
+                                      Stretch="Uniform"
+                                      Margin="9,4,9,4"/>
+
+                                        <TextBlock Grid.Column="1"
+                                           Text="Log out"
+                                           FontSize="14"
+                                           Foreground="#202124"
+                                           Margin="10,0,0,0"
+                                           VerticalAlignment="Center"/>
+                                    </Grid>
+                                </Border>
+
+                                <ControlTemplate.Triggers>
+                                    <Trigger Property="IsMouseOver"
+                                     Value="True">
+
+                                        <Setter TargetName="bgBorder"
+                                        Property="Background"
+                                        Value="#F8F9FA"/>
+                                    </Trigger>
+                                </ControlTemplate.Triggers>
+
+                            </ControlTemplate>
+                        </Button.Template>
+                    </Button>
+
+                </StackPanel>
+
+            </Border>
+
+        </Popup>
     </Grid>
+
+
+
 </UserControl>
