@@ -53,57 +53,52 @@ namespace DrawServer
             { IsBackground = true }.Start();
         }
 
+        // Trong ServerSocket.cs - Phương thức HandleClient
         private void HandleClient(TcpClient client)
         {
-            var stream = client.GetStream();
-            byte[] buffer = new byte[8192];
-            StringBuilder sb = new StringBuilder();
+            NetworkStream stream = client.GetStream();
+            byte[] bytes = new byte[8192]; // Buffer lớn hơn một chút
+            StringBuilder messageBuffer = new StringBuilder();
 
             try
             {
-                while (true)
+                int i;
+                while ((i = stream.Read(bytes, 0, bytes.Length)) != 0)
                 {
-                    int len = stream.Read(buffer, 0, buffer.Length);
-                    if (len <= 0) break;
+                    string data = Encoding.UTF8.GetString(bytes, 0, i);
+                    messageBuffer.Append(data);
 
-                    // Chuyển byte sang string và đưa vào buffer tạm
-                    sb.Append(Encoding.UTF8.GetString(buffer, 0, len));
-                    string currentData = sb.ToString();
-
-                    // Xử lý từng dòng (mỗi dòng là 1 gói JSON kết thúc bằng \n)
-                    int newlineIndex;
-                    while ((newlineIndex = currentData.IndexOf('\n')) >= 0)
+                    // Xử lý tất cả các tin nhắn hoàn chỉnh trong buffer (kết thúc bằng \n)
+                    string currentContent = messageBuffer.ToString();
+                    int nextLineIndex;
+                    while ((nextLineIndex = currentContent.IndexOf('\n')) != -1)
                     {
-                        string singleMsg = currentData.Substring(0, newlineIndex).Trim();
-                        currentData = currentData.Substring(newlineIndex + 1);
-
-                        // Cập nhật lại StringBuilder với phần dữ liệu còn sót lại
-                        sb.Clear();
-                        sb.Append(currentData);
-
-                        if (!string.IsNullOrEmpty(singleMsg))
+                        string singleMessage = currentContent.Substring(0, nextLineIndex).Trim();
+                        if (!string.IsNullOrEmpty(singleMessage))
                         {
-                            ProcessLogic(client, singleMsg);
+                            ProcessLogic(client, singleMessage); // Tách logic xử lý ra hàm riêng
                         }
+
+                        currentContent = currentContent.Substring(nextLineIndex + 1);
+                        messageBuffer.Clear();
+                        messageBuffer.Append(currentContent);
                     }
                 }
             }
-            catch { }
+            catch (Exception ex) { /* Xử lý khi client ngắt kết nối */ }
             finally
             {
-                // Khi ngắt kết nối, lấy thông tin để báo cho Master Server
                 if (clientMetadata.TryRemove(client, out var metadata))
                 {
-                    Console.WriteLine($"User {metadata.UserId} đã rời phòng {metadata.RoomId}. Đang cập nhật Database...");
                     _ = NotifyMasterStatusChanged(metadata.UserId, int.Parse(metadata.RoomId), false);
                 }
 
                 RemoveClientFromAllRooms(client);
                 client.Close();
-                Console.WriteLine("Client đã ngắt kết nối.");
+
+                Console.WriteLine("Client disconnected + cleaned up");
             }
         }
-
         private void ProcessLogic(TcpClient client, string jsonMsg)
         {
             try
@@ -135,21 +130,28 @@ namespace DrawServer
 
                     SendHistoryToClient(client, msg.roomId);
                 }
-                else if (msg.type == "DRAW")
+                else if (
+     msg.type == "DRAW" ||
+     msg.type == "ERASE" ||
+     msg.type == "SHAPE" ||
+     msg.type == "TEXT" ||
+     msg.type == "CLEAR"
+ )
                 {
-                    // Lấy userId thật từ connection
                     if (clientMetadata.TryGetValue(client, out var metadata))
                     {
                         msg.userId = metadata.UserId;
                     }
 
                     Console.WriteLine(
-                        "[SERVER] DRAW USER ID = "
+                        "[SERVER] ACTION USER ID = "
                         + msg.userId);
 
+                    string updatedJson = JsonSerializer.Serialize(msg);
+
+                    BroadcastToRoom(msg.roomId, updatedJson, client);
                     SaveDrawAction(msg);
 
-                    BroadcastToRoom(msg.roomId, jsonMsg, client);
                 }
                 else if (msg.type == "LEAVE")
                 {
@@ -181,28 +183,32 @@ namespace DrawServer
 
         private void BroadcastToRoom(string roomId, string rawJson, TcpClient sender)
         {
-            // Kiểm tra xem tòa nhà có phòng này không
             if (!rooms.TryGetValue(roomId, out var clients)) return;
 
-            // Đảm bảo có ký tự \n ở cuối để Client cũng tách được gói tin
-            if (!rawJson.EndsWith("\n")) rawJson += "\n";
+            if (!rawJson.EndsWith("\n"))
+                rawJson += "\n";
+
             byte[] data = Encoding.UTF8.GetBytes(rawJson);
 
-            // Chỉ duyệt qua những người đang ở trong đúng roomId này
             foreach (var client in clients.Keys)
             {
-                // Không gửi lại cho chính người vừa vẽ
-                if (client == sender || !client.Connected) continue;
+                if (!client.Connected)
+                {
+                    clients.TryRemove(client, out _);
+                    continue;
+                }
 
                 try
                 {
-                    // Dùng BeginWrite thay vì Write để không bị block luồng khi có Client mạng chậm
-                    client.GetStream().BeginWrite(data, 0, data.Length, null, null);
+                    var stream = client.GetStream();
+                    stream.Write(data, 0, data.Length);
                 }
-                catch { /* Client lỗi, sẽ được dọn dẹp ở vòng lặp sau */ }
+                catch
+                {
+                    clients.TryRemove(client, out _);
+                }
             }
         }
-
         private void RemoveClientFromRoom(string roomId, TcpClient client)
         {
             if (rooms.TryGetValue(roomId, out var clients))
@@ -217,6 +223,10 @@ namespace DrawServer
             Console.WriteLine("roomId = " + msg.roomId);
             Console.WriteLine("userId = " + msg.userId);
             Console.WriteLine("type = " + msg.type);
+            if (msg.type == "DRAW" || msg.type == "ERASE")
+            {
+                DeleteOldTempActions(msg.roomId, msg.userId, msg.type);
+            }
             try
             {
                 using (MySqlConnection conn =
@@ -285,7 +295,7 @@ namespace DrawServer
                     {
                         cmd.Parameters.AddWithValue(
                             "@room_id",
-                            int.Parse(roomId));
+                            int.TryParse(roomId, out int roomIdInt));
 
                         using (var reader =
                             cmd.ExecuteReader())
@@ -316,6 +326,29 @@ namespace DrawServer
             return history;
         }
 
+        private void DeleteOldTempActions(string roomId, int userId, string type)
+        {
+            using (var conn = new MySqlConnection(connectionString))
+            {
+                conn.Open();
+
+                string sql = @"
+            DELETE FROM DrawActions
+            WHERE room_id = @roomId
+            AND user_id = @userId
+            AND type = @type";
+
+                using (var cmd = new MySqlCommand(sql, conn))
+                {
+                    cmd.Parameters.AddWithValue("@roomId", int.TryParse(roomId, out int roomIdInt));
+                    cmd.Parameters.AddWithValue("@userId", userId);
+                    cmd.Parameters.AddWithValue("@type", type);
+
+                    cmd.ExecuteNonQuery();
+                }
+
+            }
+        }
         private void SendHistoryToClient(TcpClient client, string roomId)
         {
             try

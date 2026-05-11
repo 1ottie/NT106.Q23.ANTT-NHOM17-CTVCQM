@@ -127,7 +127,11 @@ namespace DrawClient.ViewModels.Canvas
         public string CurrentColor
         {
             get => _currentColor;
-            set { _currentColor = value; OnPropertyChanged(); }
+            set {
+                _currentColor = value;
+                OnPropertyChanged(); // Thông báo đổi màu
+                OnPropertyChanged(nameof(CurrentColorBrush));
+            }
         }
 
         //hàm xử lý khi người dùng chọn một màu mới từ bảng màu
@@ -144,41 +148,48 @@ namespace DrawClient.ViewModels.Canvas
             ExecuteChangeColor(hexColor);
         }
         // ================= TOOL SELECTION (HIGHLIGHT FIX) =================
-
         private bool _isPencilSelected = true;
         public bool IsPencilSelected
         {
             get => _isPencilSelected;
             set
             {
+                if (_isPencilSelected == value)
+                    return;
+
                 _isPencilSelected = value;
                 OnPropertyChanged();
 
-                if (value)
+                if (value && _isEraserSelected)
                 {
-                    IsEraserSelected = false;
-                    UpdateCurrentSize();
+                    _isEraserSelected = false;
+                    OnPropertyChanged(nameof(IsEraserSelected));
                 }
+
+                UpdateCurrentSize();
             }
         }
-
         private bool _isEraserSelected;
         public bool IsEraserSelected
         {
             get => _isEraserSelected;
             set
             {
+                if (_isEraserSelected == value)
+                    return;
+
                 _isEraserSelected = value;
                 OnPropertyChanged();
 
-                if (value)
+                if (value && _isPencilSelected)
                 {
-                    IsPencilSelected = false;
-                    UpdateCurrentSize();
+                    _isPencilSelected = false;
+                    OnPropertyChanged(nameof(IsPencilSelected));
                 }
+
+                UpdateCurrentSize();
             }
         }
-
         // ================= SIZE =================
 
         private double _pencilSize = 4;
@@ -205,7 +216,7 @@ namespace DrawClient.ViewModels.Canvas
             }
         }
 
-        private double _currentThickness = 4;
+        private double _currentThickness = 2.0;
         public double CurrentThickness
         {
             get => _currentThickness;
@@ -233,14 +244,10 @@ namespace DrawClient.ViewModels.Canvas
             {
                 case "Pencil":
                     IsPencilPopupOpen = !IsPencilPopupOpen;
-                    IsPencilSelected = true;
-                    IsEraserSelected = false;
                     break;
 
                 case "Eraser":
                     IsEraserPopupOpen = !IsEraserPopupOpen;
-                    IsEraserSelected = true;
-                    IsPencilSelected = false;
                     break;
 
                 case "Shape":

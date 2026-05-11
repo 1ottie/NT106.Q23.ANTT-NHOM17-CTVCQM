@@ -1,9 +1,10 @@
-﻿using System;
+﻿using DrawClient.Models;
+using System;
 using System.Net.Sockets;
 using System.Text;
 using System.Text.Json;
 using System.Threading;
-using DrawClient.Models;
+using System.Windows.Interop;
 
 namespace DrawClient
 {
@@ -95,7 +96,8 @@ namespace DrawClient
                 {
                     type = "JOIN",
                     roomId = currentRoomId,
-                    userId = CurrentUserId
+                    userId = CurrentUserId,
+                    username = CurrentUsername
                 });
 
                 return true;
@@ -142,7 +144,8 @@ namespace DrawClient
             {
                 type = "JOIN",
                 roomId = currentRoomId,
-                userId = CurrentUserId
+                userId = CurrentUserId,
+                username = CurrentUsername
             });
         }
 
@@ -192,11 +195,12 @@ namespace DrawClient
                 if (stream == null || client == null || !client.Connected)
                     return;
 
-                string json = JsonSerializer.Serialize(obj);
+                string json = JsonSerializer.Serialize(obj) + "\n";
 
-                byte[] data = Encoding.UTF8.GetBytes(json + "\n");
+                byte[] data = Encoding.UTF8.GetBytes(json);
 
                 stream.Write(data, 0, data.Length);
+                stream.Flush();
             }
             catch (Exception ex)
             {
@@ -217,20 +221,24 @@ namespace DrawClient
 
                     string type = typeElement.GetString();
 
+                    var options = new JsonSerializerOptions
+                    {
+                        PropertyNameCaseInsensitive = true
+                    };
+
                     if (type == "HISTORY")
                     {
                         OnMessageReceived?.Invoke(msg);
                         return;
                     }
 
-                    var options = new JsonSerializerOptions
-                    {
-                        PropertyNameCaseInsensitive = true
-                    };
-
-                    var draw = JsonSerializer.Deserialize<DrawMessage>(msg, options);
-
-                    if (draw != null)
+                    if (
+                        type == "DRAW" ||
+                        type == "ERASE" ||
+                        type == "SHAPE" ||
+                        type == "TEXT" ||
+                        type == "CLEAR"
+                    )
                     {
                         OnMessageReceived?.Invoke(msg);
                     }
@@ -245,16 +253,19 @@ namespace DrawClient
 
         public void Disconnect()
         {
+            _isRunning = false;
+
             try
             {
-                _isRunning = false;
-
-                receiveThread?.Interrupt();
+                stream?.Close();
             }
             catch { }
 
-            try { stream?.Close(); } catch { }
-            try { client?.Close(); } catch { }
+            try
+            {
+                client?.Close();
+            }
+            catch { }
 
             stream = null;
             client = null;

@@ -18,6 +18,11 @@ namespace DrawServer
         public double y2 { get; set; }
         public string color { get; set; }
         public double thickness { get; set; }
+        public string shapeType { get; set; }
+
+        public string text { get; set; }
+
+        public double fontSize { get; set; }
 
         // Dữ liệu chat
         public string username { get; set; }

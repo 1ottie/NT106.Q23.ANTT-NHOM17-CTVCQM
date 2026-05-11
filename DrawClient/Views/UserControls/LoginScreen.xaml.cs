@@ -107,6 +107,10 @@ namespace DrawClient.Views
 
                             ClientSocket.Instance.CurrentUserId = userId;
 
+                            // BỔ SUNG: Cập nhật username ngay khi đăng nhập thành công
+                            LoginViewModel.CurrentUsername = username;
+                            ClientSocket.Instance.CurrentUsername = username;
+
                             System.Diagnostics.Debug.WriteLine(
                                 "[LOGIN USER ID] = " + userId);
 
