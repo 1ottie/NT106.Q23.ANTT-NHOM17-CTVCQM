@@ -1,4 +1,6 @@
-﻿namespace DrawClient
+﻿using System;
+
+namespace DrawClient
 {
     public class DrawMessage
     {
@@ -14,7 +16,15 @@
         public string color { get; set; }
         public double thickness { get; set; }
 
-        // Thêm 2 dòng này để hứng dữ liệu Chat (nếu có) mà không bị crash
+        // SHAPE
+        public string shapeType { get; set; }
+        public double width => Math.Abs(x2 - x1);
+        public double height => Math.Abs(y2 - y1);
+        // TEXT
+        public string text { get; set; }
+        public double fontSize { get; set; }
+
+        // CHAT
         public string username { get; set; }
         public string content { get; set; }
     }

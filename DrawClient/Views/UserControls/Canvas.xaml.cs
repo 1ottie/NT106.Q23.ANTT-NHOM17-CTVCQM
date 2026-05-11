@@ -48,7 +48,8 @@ namespace DrawClient.Views.UserControls
                 _viewModel.OnLineReceived -= DrawNetworkLine;
                 _viewModel.OnCanvasCleared -= ClearLocalCanvas;
                 _viewModel.PropertyChanged -= ViewModel_PropertyChanged;
-
+                _viewModel.OnShapeReceived -= DrawShape;
+                _viewModel.OnTextReceived -= DrawText;
                 // FIX SOCKET MEMORY LEAK
                 _viewModel.Cleanup();
             }
@@ -56,29 +57,34 @@ namespace DrawClient.Views.UserControls
 
         private void Canvas_DataContextChanged(object sender, DependencyPropertyChangedEventArgs e)
         {
+            // 1. Unsubscribe VM cũ trước
             if (e.OldValue is CanvasViewModel oldVm)
             {
                 oldVm.OnLineReceived -= DrawNetworkLine;
                 oldVm.OnCanvasCleared -= ClearLocalCanvas;
                 oldVm.PropertyChanged -= ViewModel_PropertyChanged;
+                oldVm.OnShapeReceived -= DrawShape;
+                oldVm.OnTextReceived -= DrawText;
 
-                // Ngắt kết nối sự kiện cũ
                 if (oldVm.Toolbar != null)
                 {
                     oldVm.Toolbar.PropertyChanged -= Toolbar_PropertyChanged;
                     oldVm.Toolbar.ToolSelected -= Toolbar_ToolSelected;
                 }
-                oldVm.Cleanup();
             }
 
+            // 2. Gán VM mới
             if (e.NewValue is CanvasViewModel newVm)
             {
                 _viewModel = newVm;
+
+                // 3. Subscribe đúng instance
                 _viewModel.OnLineReceived += DrawNetworkLine;
                 _viewModel.OnCanvasCleared += ClearLocalCanvas;
                 _viewModel.PropertyChanged += ViewModel_PropertyChanged;
+                _viewModel.OnShapeReceived += DrawShape;
+                _viewModel.OnTextReceived += DrawText;
 
-                // Kết nối sự kiện lắng nghe bút và màu thay đổi
                 if (_viewModel.Toolbar != null)
                 {
                     _viewModel.Toolbar.PropertyChanged += Toolbar_PropertyChanged;
@@ -92,7 +98,13 @@ namespace DrawClient.Views.UserControls
         // Lắng nghe mỗi khi Size, Màu hoặc Loại bút thay đổi trong ViewModel
         private void Toolbar_PropertyChanged(object sender, PropertyChangedEventArgs e)
         {
-            if (_viewModel != null && (e.PropertyName == "CurrentThickness" || e.PropertyName == "PencilSize" || e.PropertyName == "CurrentColor" || e.PropertyName == "CurrentPenType"))
+            if (_viewModel != null && (e.PropertyName == "CurrentThickness" ||
+                                       e.PropertyName == "PencilSize" ||
+                                       e.PropertyName == "EraserSize" ||
+                                       e.PropertyName == "CurrentColor" ||
+                                       e.PropertyName == "CurrentPenType" ||
+                                       e.PropertyName == "IsEraserSelected" ||
+                                       e.PropertyName == "IsPencilSelected"))
             {
                 UpdateCurrentDrawingAttributes(_viewModel);
             }
@@ -114,12 +126,10 @@ namespace DrawClient.Views.UserControls
             string penType = vm.Toolbar.CurrentPenType?.ToLowerInvariant();
             string selectedTool = vm.SelectedTool?.ToLowerInvariant();
             double size = vm.Toolbar.IsEraserSelected ? vm.Toolbar.EraserSize : vm.Toolbar.PencilSize;
-            bool isEraser = selectedTool == "eraser";
-
+            bool isEraser = vm.Toolbar.IsEraserSelected || selectedTool == "eraser";
             try
             {
-                var color = (System.Windows.Media.Color)System.Windows.Media.ColorConverter.ConvertFromString(vm.Toolbar.CurrentColor);
-
+                var color = (Color)ColorConverter.ConvertFromString(_viewModel.Toolbar.CurrentColor);
                 var attributes = new DrawingAttributes
                 {
                     Color = color,
@@ -175,9 +185,10 @@ namespace DrawClient.Views.UserControls
                 {
                     MyCanvas.EditingMode = InkCanvasEditingMode.EraseByPoint;
                 }
-                else if (penType != null && shapes.Contains(penType)) // nhận diện tất cả các hình
+                else if (_viewModel.SelectedTool?.ToLower() == "shape")
                 {
-                    MyCanvas.EditingMode = InkCanvasEditingMode.None; // Tắt ink để vẽ hình
+                    MyCanvas.EditingMode = InkCanvasEditingMode.None;
+                    return;
                 }
                 else
                 {
@@ -203,6 +214,11 @@ namespace DrawClient.Views.UserControls
                 {
                     MyCanvas.EditingMode = InkCanvasEditingMode.EraseByPoint;
                 }
+                else if (_viewModel.SelectedTool?.ToLower() == "shape")
+                {
+                    MyCanvas.EditingMode = InkCanvasEditingMode.None;
+                    return;
+                }
                 else
                 {
                     MyCanvas.EditingMode = _viewModel.CurrentEditingMode;
@@ -219,7 +235,17 @@ namespace DrawClient.Views.UserControls
         {
             if (_viewModel == null)
                 return;
+            lastPoint = e.GetPosition(MyCanvas); // Cập nhật điểm bắt đầu ngay khi nhấn chuột
+            _startPoint = lastPoint;
 
+            if (_viewModel.Toolbar.IsPencilSelected)
+            {
+                isDrawing = true;
+            }
+            else if (_viewModel.SelectedTool?.ToLower() == "shape")
+            {
+                isShapeDrawing = true;
+            }
             DependencyObject source = e.OriginalSource as DependencyObject;
 
             while (source != null)
@@ -261,9 +287,23 @@ namespace DrawClient.Views.UserControls
 
             string penType = _viewModel.Toolbar.CurrentPenType?.ToLowerInvariant();
             string selectedTool = _viewModel.SelectedTool?.ToLowerInvariant();
-            bool isEraser = selectedTool == "eraser";
+            bool isEraser = _viewModel.Toolbar.IsEraserSelected || selectedTool == "eraser";
 
-            if (_viewModel.CurrentEditingMode != InkCanvasEditingMode.Ink && !isEraser)
+            var shapes = new List<string>
+            {
+                "square",
+                "circle",
+                "triangle",
+                "line",
+                "rectangle",
+                "ellipse"
+            };
+
+            bool isShape = penType != null && shapes.Contains(penType);
+
+            if (_viewModel.CurrentEditingMode != InkCanvasEditingMode.Ink
+                && !isEraser
+                && !isShape)
             {
                 return;
             }
@@ -283,7 +323,6 @@ namespace DrawClient.Views.UserControls
             }
 
             // 2. Nếu là Shape
-            var shapes = new List<string> { "square", "circle", "triangle", "line", "rectangle", "ellipse" };
             if (penType != null && shapes.Contains(penType))
             {
                 isShapeDrawing = true;
@@ -307,10 +346,15 @@ namespace DrawClient.Views.UserControls
                 return;
 
             Point currentPoint = e.GetPosition(MyCanvas);
+
+            // Tránh xử lý nếu chuột không thực sự di chuyển (tiết kiệm tài nguyên)
+            if (currentPoint == lastPoint) return;
+
             string tool = _viewModel.SelectedTool?.ToLowerInvariant();
             string penType = _viewModel.Toolbar.CurrentPenType?.ToLowerInvariant();
+            bool isEraser = _viewModel.Toolbar.IsEraserSelected || tool == "eraser";
 
-            // SHAPE MODE 
+            // 1. CHẾ ĐỘ VẼ HÌNH (SHAPE MODE)
             if (isShapeDrawing)
             {
                 if (_currentTempStroke != null)
@@ -319,7 +363,6 @@ namespace DrawClient.Views.UserControls
                 }
 
                 StylusPointCollection points = null;
-
                 if (penType == "square" || penType == "rectangle")
                     points = CreateRectanglePoints(_startPoint, currentPoint);
                 else if (penType == "circle" || penType == "ellipse")
@@ -338,19 +381,19 @@ namespace DrawClient.Views.UserControls
                     _currentTempStroke.DrawingAttributes.FitToCurve = false;
                     MyCanvas.Strokes.Add(_currentTempStroke);
                 }
-                return; // Đảm bảo thoát ra, không chạy xuống code vẽ nét
+                return;
             }
 
-            // ERASER
-            if (_viewModel.CurrentEditingMode != InkCanvasEditingMode.Ink && tool == "eraser")
-                return;
-
-            if (tool == "eraser")
+            // 2. CHẾ ĐỘ TẨY (ERASER)
+            if (isEraser)
             {
+                // Xóa trên máy cục bộ
                 MyCanvas.Strokes.Erase(
                     new Point[] { lastPoint, currentPoint },
-                    new EllipseStylusShape(_viewModel.Toolbar.CurrentThickness, _viewModel.Toolbar.CurrentThickness));
+                    new EllipseStylusShape(_viewModel.Toolbar.EraserSize, _viewModel.Toolbar.EraserSize));
 
+                // Gửi lệnh xóa cho người khác
+                DrawNetworkLine(lastPoint, currentPoint, _viewModel.Toolbar.CurrentColor, _viewModel.Toolbar.CurrentThickness);
                 _viewModel.SendDrawData(lastPoint, currentPoint);
                 lastPoint = currentPoint;
 
@@ -358,40 +401,78 @@ namespace DrawClient.Views.UserControls
                 return;
             }
 
-            // NORMAL DRAW (INK)
-            if (isDrawing)
+            // 3. CHẾ ĐỘ VẼ BÚT THƯỜNG (NORMAL DRAW / PENCIL)
+            if (_viewModel.Toolbar.IsPencilSelected && e.LeftButton == MouseButtonState.Pressed)
             {
+                // Gửi dữ liệu vẽ đi (Hàm này trong ViewModel sẽ lo việc đóng gói JSON và gửi qua Socket)
                 _viewModel.SendDrawData(lastPoint, currentPoint);
+
+                // Cập nhật điểm cuối cho đoạn vẽ tiếp theo
                 lastPoint = currentPoint;
             }
         }
         private void Canvas_MouseUp(object sender, MouseButtonEventArgs e)
         {
+            // NORMAL DRAW / ERASER
             if (isDrawing)
             {
                 isDrawing = false;
-                isShapeDrawing = false;
-                _currentTempStroke = null; // Giải phóng stroke tạm
-                MyCanvas.ReleaseMouseCapture();
+
+                if (EraserCursor != null)
+                {
+                    EraserCursor.Visibility = Visibility.Collapsed;
+                }
+
+                _currentTempStroke = null;
+
+                if (MyCanvas.IsMouseCaptured)
+                {
+                    MyCanvas.ReleaseMouseCapture();
+                }
             }
 
-            if (EraserCursor != null)
-            {
-                EraserCursor.Visibility = Visibility.Collapsed;
-            }
-
-            if (MyCanvas.IsMouseCaptured)
-            {
-                MyCanvas.ReleaseMouseCapture();
-            }
+            // SHAPE DRAW
             if (isShapeDrawing)
             {
-                isShapeDrawing = false;
-                MyCanvas.ReleaseMouseCapture();
-                // dọn dẹp biến tạm
+                Point endPoint = e.GetPosition(MyCanvas);
+
+                string penType =
+                    _viewModel?.Toolbar?.CurrentPenType?.ToLowerInvariant();
+
+                // XÓA PREVIEW STROKE CŨ
                 _currentTempStroke = null;
-                // Trả lại chế độ Ink nếu cần hoặc giữ nguyên tùy 
-                // MyCanvas.EditingMode = InkCanvasEditingMode.Ink;
+                //vẽ local
+                // GỬI QUA SERVER
+                ClientSocket.Instance.Send(new DrawMessage
+                {
+                    type = "SHAPE",
+
+                    roomId = _viewModel.RoomId,
+
+                    userId = ClientSocket.Instance.CurrentUserId,
+
+                    username = ClientSocket.Instance.CurrentUsername,
+
+                    shapeType = penType,
+
+                    x1 = _startPoint.X,
+                    y1 = _startPoint.Y,
+
+                    x2 = endPoint.X,
+                    y2 = endPoint.Y,
+
+                    color = _viewModel.Toolbar.CurrentColor,
+                    thickness = _viewModel.Toolbar.CurrentThickness
+                });
+
+                isShapeDrawing = false;
+
+                _currentTempStroke = null;
+
+                if (MyCanvas.IsMouseCaptured)
+                {
+                    MyCanvas.ReleaseMouseCapture();
+                }
             }
         }
 
@@ -466,19 +547,129 @@ namespace DrawClient.Views.UserControls
             }
         }
 
-        private void DrawNetworkLine(
-            Point p1,
-            Point p2,
-            string hexColor,
-            double thickness)
+        // Trong Canvas.xaml.cs - Tìm các phương thức vẽ từ mạng (ví dụ DrawNetworkLine)
+        private void DrawNetworkLine(Point start, Point end, string colorHex, double thickness)
         {
             Application.Current.Dispatcher.Invoke(() =>
             {
-                DrawLineLocal(
-                    p1,
-                    p2,
-                    hexColor,
-                    thickness);
+                try
+                {
+                    Color color;
+
+                    // 🔥 FIX CASE ERASER
+                    if (string.IsNullOrWhiteSpace(colorHex) || colorHex == "#ERASE")
+                    {
+                        color = Colors.Transparent;
+                    }
+                    else
+                    {
+                        color = (Color)ColorConverter.ConvertFromString(colorHex);
+                    }
+
+                    var attributes = new DrawingAttributes
+                    {
+                        Color = color,
+                        Width = thickness,
+                        Height = thickness,
+                        FitToCurve = true
+                    };
+
+                    var points = new StylusPointCollection
+            {
+                new StylusPoint(start.X, start.Y),
+                new StylusPoint(end.X, end.Y)
+            };
+
+                    var stroke = new Stroke(points, attributes);
+
+                    MyCanvas.Strokes.Add(stroke);
+                }
+                catch (FormatException)
+                {
+                    // 🔥 fallback an toàn tuyệt đối
+                    var fallbackColor = Colors.Black;
+
+                    var attributes = new DrawingAttributes
+                    {
+                        Color = fallbackColor,
+                        Width = thickness,
+                        Height = thickness,
+                        FitToCurve = true
+                    };
+
+                    var points = new StylusPointCollection
+            {
+                new StylusPoint(start.X, start.Y),
+                new StylusPoint(end.X, end.Y)
+            };
+
+                    MyCanvas.Strokes.Add(new Stroke(points, attributes));
+                }
+            });
+        }
+        private void DrawShape(DrawMessage msg)
+        {
+            Application.Current.Dispatcher.Invoke(() =>
+            {
+                StylusPointCollection points = null;
+
+                Point start = new Point(msg.x1, msg.y1);
+                Point end = new Point(msg.x2, msg.y2);
+
+                switch (msg.shapeType?.ToLower())
+                {
+                    case "rectangle":
+                    case "square":
+                        points = CreateRectanglePoints(start, end);
+                        break;
+
+                    case "ellipse":
+                    case "circle":
+                        points = CreateEllipsePoints(start, end);
+                        break;
+
+                    case "triangle":
+                        points = CreateTrianglePoints(start, end);
+                        break;
+
+                    case "line":
+                        points = CreateLinePoints(start, end);
+                        break;
+                }
+
+                if (points == null) return;
+
+                Stroke stroke = new Stroke(points)
+                {
+                    DrawingAttributes = new DrawingAttributes
+                    {
+                        Color = (Color)ColorConverter.ConvertFromString(msg.color),
+                        Width = msg.thickness,
+                        Height = msg.thickness,
+                        FitToCurve = false,
+                        IgnorePressure = true
+                    }
+                };
+
+                MyCanvas.Strokes.Add(stroke);
+            });
+        }
+        private void DrawText(DrawMessage msg)
+        {
+            Application.Current.Dispatcher.Invoke(() =>
+            {
+                TextBlock tb = new TextBlock
+                {
+                    Text = msg.text,
+                    FontSize = msg.fontSize,
+                    Foreground = new SolidColorBrush(
+                        (Color)ColorConverter.ConvertFromString(msg.color))
+                };
+
+                InkCanvas.SetLeft(tb, msg.x1);
+                InkCanvas.SetTop(tb, msg.y1);
+
+                MyCanvas.Children.Add(tb);
             });
         }
 

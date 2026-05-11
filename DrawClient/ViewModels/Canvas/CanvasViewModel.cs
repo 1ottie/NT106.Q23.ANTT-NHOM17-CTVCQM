@@ -31,94 +31,43 @@ namespace DrawClient.ViewModels
         public ToolbarViewModel Toolbar { get; set; } = new ToolbarViewModel();
 
         public Action<Point, Point, string, double> OnLineReceived;
+        public Action<DrawMessage> OnShapeReceived;
+        public Action<DrawMessage> OnTextReceived;
         public Action OnCanvasCleared;
         public Action GoBackToLobby;
 
         private bool _isCleanedUp = false;
 
+        #region Properties
         private string _roomName;
-        public string RoomName
-        {
-            get => _roomName;
-            set { _roomName = value; OnPropertyChanged(); }
-        }
+        public string RoomName { get => _roomName; set { _roomName = value; OnPropertyChanged(); } }
 
         private string _roomId;
-        public string RoomId
-        {
-            get => _roomId;
-            set { _roomId = value; OnPropertyChanged(); }
-        }
+        public string RoomId { get => _roomId; set { _roomId = value; OnPropertyChanged(); } }
 
         private string _roomPassword;
-        public string RoomPassword
-        {
-            get => _roomPassword;
-            set { _roomPassword = value; OnPropertyChanged(); }
-        }
+        public string RoomPassword { get => _roomPassword; set { _roomPassword = value; OnPropertyChanged(); } }
 
         private bool _isColorMenuOpen;
-        public bool IsColorMenuOpen
-        {
-            get => _isColorMenuOpen;
-            set { _isColorMenuOpen = value; OnPropertyChanged(); }
-        }
+        public bool IsColorMenuOpen { get => _isColorMenuOpen; set { _isColorMenuOpen = value; OnPropertyChanged(); } }
 
         private bool _isPenMenuOpen;
-        public bool IsPenMenuOpen
-        {
-            get => _isPenMenuOpen;
-            set { _isPenMenuOpen = value; OnPropertyChanged(); }
-        }
+        public bool IsPenMenuOpen { get => _isPenMenuOpen; set { _isPenMenuOpen = value; OnPropertyChanged(); } }
 
         private string _currentPenType = "Brush";
-        public string CurrentPenType
-        {
-            get => _currentPenType;
-            set { _currentPenType = value; OnPropertyChanged(); }
-        }
+        public string CurrentPenType { get => _currentPenType; set { _currentPenType = value; OnPropertyChanged(); } }
 
         private InkCanvasEditingMode _currentEditingMode = InkCanvasEditingMode.Ink;
-        public InkCanvasEditingMode CurrentEditingMode
-        {
-            get => _currentEditingMode;
-            set { _currentEditingMode = value; OnPropertyChanged(); }
-        }
+        public InkCanvasEditingMode CurrentEditingMode { get => _currentEditingMode; set { _currentEditingMode = value; OnPropertyChanged(); } }
 
         private bool _isSidebarOpen = true;
-        public GridLength RightSidebarWidth =>
-            _isSidebarOpen
-                ? new GridLength(320)
-                : new GridLength(0);
+        public GridLength RightSidebarWidth => _isSidebarOpen ? new GridLength(320) : new GridLength(0);
 
         private bool _isProfilePopoverVisible;
-        public bool IsProfilePopoverVisible
-        {
-            get => _isProfilePopoverVisible;
-            set { _isProfilePopoverVisible = value; OnPropertyChanged(); }
-        }
+        public bool IsProfilePopoverVisible { get => _isProfilePopoverVisible; set { _isProfilePopoverVisible = value; OnPropertyChanged(); } }
 
         private string _currentColor = "#000000";
-        public string CurrentColor
-        {
-            get => _currentColor;
-            set
-            {
-                _currentColor = value;
-                OnPropertyChanged();
-            }
-        }
-
-        private double _currentThickness = 4.0;
-        public double CurrentThickness
-        {
-            get => _currentThickness;
-            set
-            {
-                _currentThickness = value;
-                OnPropertyChanged();
-            }
-        }
+        public string CurrentColor { get => _currentColor; set { _currentColor = value; OnPropertyChanged(); } }
 
         private double _penThickness = 4.0;
         public double PenThickness
@@ -128,11 +77,7 @@ namespace DrawClient.ViewModels
             {
                 _penThickness = value;
                 OnPropertyChanged();
-
-                if (SelectedTool?.ToLower() == "pen" || SelectedTool?.ToLower() == "pencil" || SelectedTool?.ToLower() == "highlighter")
-                {
-                    CurrentThickness = value;
-                }
+                if (IsPenTool(Toolbar.CurrentPenType)) Toolbar.CurrentThickness = value;
             }
         }
 
@@ -144,20 +89,12 @@ namespace DrawClient.ViewModels
             {
                 _eraserThickness = value;
                 OnPropertyChanged();
-
-                if (SelectedTool?.ToLower() == "eraser")
-                {
-                    CurrentThickness = value;
-                }
+                if (SelectedTool?.ToLower() == "eraser") Toolbar.CurrentThickness = value;
             }
         }
 
         private string _currentUserInitials;
-        public string CurrentUserInitials
-        {
-            get => _currentUserInitials;
-            set { _currentUserInitials = value; OnPropertyChanged(); }
-        }
+        public string CurrentUserInitials { get => _currentUserInitials; set { _currentUserInitials = value; OnPropertyChanged(); } }
 
         private string _selectedTool = "pen";
         public string SelectedTool
@@ -167,20 +104,21 @@ namespace DrawClient.ViewModels
             {
                 _selectedTool = value;
                 OnPropertyChanged();
-
-                if (_selectedTool?.ToLower() == "eraser")
-                {
-                    CurrentThickness = EraserThickness;
-                }
-                else
-                {
-                    CurrentThickness = PenThickness;
-                }
+                Toolbar.CurrentThickness = (_selectedTool?.ToLower() == "eraser") ? EraserThickness : PenThickness;
             }
         }
 
-        private string _previousColor = "#000000";
+        private string _currentShape = "rectangle"; // Mặc định là hình chữ nhật
+        public string CurrentShape
+        {
+            get => _currentShape;
+            set { _currentShape = value; OnPropertyChanged(); }
+        }
 
+        private string _previousColor = "#000000";
+        #endregion
+
+        #region Commands
         public ICommand LeaveRoomCommand { get; }
         public ICommand ShowRoomInfoCommand { get; }
         public ICommand ToggleSidebarCommand { get; }
@@ -194,7 +132,8 @@ namespace DrawClient.ViewModels
         public ICommand ChangeColorCommand { get; }
         public ICommand ChangePenTypeCommand { get; }
         public ICommand ChangeThicknessCommand { get; }
-
+        public ICommand ChangeShapeCommand { get; } // Lệnh đổi hình dạng
+        #endregion
         public ObservableCollection<UserParticipant> Users { get; set; }
         public ObservableCollection<string> NetworkLogs { get; set; }
         public ObservableCollection<ChatMessage> ChatMessages { get; set; }
@@ -348,6 +287,15 @@ namespace DrawClient.ViewModels
                     }
                 }
             });
+            ChangeShapeCommand = new RelayCommand(param =>
+            {
+                if (param != null)
+                {
+                    CurrentShape = param.ToString();
+                    SelectedTool = "shape"; // Tự động chuyển sang mode hình dạng
+                    CurrentEditingMode = InkCanvasEditingMode.None;
+                }
+            });
         }
 
         private void ExecuteSelectTool(object obj)
@@ -396,7 +344,8 @@ namespace DrawClient.ViewModels
                     CurrentEditingMode = InkCanvasEditingMode.Ink;
                     Toolbar.IsPencilSelected = true;   
                     Toolbar.IsEraserSelected = false;
-
+                    Toolbar.CurrentColor = CurrentColor;
+                    Toolbar.CurrentThickness = Toolbar.PencilSize;
                     if (CurrentColor == "#FFFFFF")
                     {
                         CurrentColor = _previousColor;
@@ -408,10 +357,13 @@ namespace DrawClient.ViewModels
                     CurrentEditingMode = InkCanvasEditingMode.EraseByPoint;
                     Toolbar.IsEraserSelected = true;   
                     Toolbar.IsPencilSelected = false;
-                    if (CurrentColor != "#FFFFFF")
-                    {
-                        _previousColor = CurrentColor;
-                    }
+
+                    Toolbar.CurrentThickness = Toolbar.EraserSize;
+                    break;
+                case "shape":
+                    CurrentEditingMode = InkCanvasEditingMode.None; // hoặc Select tùy thiết kế
+                    Toolbar.IsPencilSelected = false;
+                    Toolbar.IsEraserSelected = false;
                     break;
             }
         }
@@ -429,8 +381,12 @@ namespace DrawClient.ViewModels
 
             _socketInitialized = true;
 
+            ClientSocket.Instance.OnMessageReceived -= HandleSocketMessage;
             ClientSocket.Instance.OnMessageReceived += HandleSocketMessage;
         }
+
+        private readonly JsonSerializerOptions _jsonOptions =
+            new JsonSerializerOptions { PropertyNameCaseInsensitive = true };
 
         private void HandleSocketMessage(string msg)
         {
@@ -438,86 +394,161 @@ namespace DrawClient.ViewModels
             {
                 using (JsonDocument doc = JsonDocument.Parse(msg))
                 {
-                    if (!doc.RootElement.TryGetProperty("type", out JsonElement typeElement))
+                    if (!doc.RootElement.TryGetProperty("type", out var typeEl))
                         return;
 
-                    string type = typeElement.GetString();
+                    string type = typeEl.GetString();
+                    if (string.IsNullOrEmpty(type))
+                        return;
 
-                    var options = new JsonSerializerOptions
+
+
+                    // ================= HISTORY =================
+                    if (type == "HISTORY")
                     {
-                        PropertyNameCaseInsensitive = true
-                    };
+                        if (!doc.RootElement.TryGetProperty("actions", out var actions))
+                            return;
 
-                    var draw = JsonSerializer.Deserialize<DrawMessage>(msg, options);
-                    if (draw == null)
+                        foreach (var item in actions.EnumerateArray())
+                        {
+                            var draw = JsonSerializer.Deserialize<DrawMessage>(item.GetRawText(), _jsonOptions);
+                            if (draw == null) continue;
+
+                            DispatchDraw(draw);
+                        }
                         return;
-
-                    // FIX DOUBLE DRAW
-                    if (draw.userId == ClientSocket.Instance.CurrentUserId)
-                        return;
-
-                    switch (type)
-                    {
-                        case "DRAW":
-                            OnLineReceived?.Invoke(
-                                new Point(draw.x1, draw.y1),
-                                new Point(draw.x2, draw.y2),
-                                draw.color,
-                                draw.thickness);
-                            break;
-
-                        case "ERASE":
-                            OnLineReceived?.Invoke(
-                                new Point(draw.x1, draw.y1),
-                                new Point(draw.x2, draw.y2),
-                                "#ERASE",
-                                draw.thickness);
-                            break;
-
-                        case "CLEAR":
-                            OnCanvasCleared?.Invoke();
-                            break;
-
-                        case "LEAVE":
-                            // optional handle
-                            break;
-
-                        default:
-                            Console.WriteLine($"Unknown type: {type}");
-                            break;
                     }
+
+                    // ================= NORMAL MESSAGE =================
+                    var drawMsg = JsonSerializer.Deserialize<DrawMessage>(msg, _jsonOptions);
+                    if (drawMsg == null) return;
+
+                    DispatchDraw(drawMsg);
                 }
             }
             catch (Exception ex)
             {
-                Console.WriteLine("Parse error: " + ex.Message);
+                Console.WriteLine("Socket parse error: " + ex.Message);
             }
         }
 
+        private void DispatchDraw(DrawMessage draw)
+        {
+            switch (draw.type)
+            {
+                case "DRAW":
+                    InvokeUI(() =>
+                        OnLineReceived?.Invoke(
+                            new Point(draw.x1, draw.y1),
+                            new Point(draw.x2, draw.y2),
+                            draw.color,
+                            draw.thickness));
+                    break;
+
+                case "ERASE":
+                    InvokeUI(() =>
+                        OnLineReceived?.Invoke(
+                            new Point(draw.x1, draw.y1),
+                            new Point(draw.x2, draw.y2),
+                            "#ERASE",
+                            draw.thickness));
+                    break;
+
+                case "SHAPE":
+                    InvokeUI(() => OnShapeReceived?.Invoke(draw));
+                    break;
+
+                case "TEXT":
+                    InvokeUI(() => OnTextReceived?.Invoke(draw));
+                    break;
+
+                case "CLEAR":
+                    InvokeUI(() => OnCanvasCleared?.Invoke());
+                    break;
+
+                case "LEAVE":
+                    break;
+
+                default:
+                    Console.WriteLine($"Unknown type: {draw.type}");
+                    break;
+            }
+        }
+
+        private void InvokeUI(Action action)
+        {
+            Application.Current.Dispatcher.Invoke(action);
+        }
         public void SendDrawData(Point p1, Point p2)
         {
-            string safeUsername =
-                LoginViewModel.CurrentUsername
-                ?? ClientSocket.Instance.CurrentUsername
-                ?? "Unknown";
+            if (Math.Abs(p1.X - p2.X) < 0.5 && Math.Abs(p1.Y - p2.Y) < 0.5)
+                return;
+
+            bool isEraser =
+                Toolbar.IsEraserSelected ||
+                SelectedTool?.ToLower() == "eraser";
+            bool isShape = SelectedTool?.ToLower() == "shape";
 
             var msg = new DrawMessage
             {
-                type = SelectedTool?.ToLower() == "eraser" ? "ERASE" : "DRAW",
                 roomId = RoomId,
-                userId = ClientSocket.Instance.CurrentUserId,
-                username = safeUsername,
+                userId = ClientSocket.Instance.CurrentUserId, // Đảm bảo lấy ID từ Socket Instance
+                username = ClientSocket.Instance.CurrentUsername,
                 x1 = p1.X,
                 y1 = p1.Y,
                 x2 = p2.X,
                 y2 = p2.Y,
-                color = CurrentColor,
-                thickness = Toolbar.CurrentThickness
+                thickness = isEraser ? Toolbar.EraserSize : Toolbar.CurrentThickness
             };
+
+            // 3. Gán Type NHẤT QUÁN (Sửa lỗi mục 1)
+            if (isEraser)
+            {
+                msg.type = "ERASE";
+                msg.color = "#ERASE";
+                msg.thickness = Toolbar.EraserSize;
+            }
+            else if (isShape)
+            {
+                msg.type = "SHAPE";
+                msg.shapeType = CurrentShape;
+                msg.color = Toolbar.CurrentColor;
+                msg.thickness = Toolbar.PencilSize;
+            }
+            else
+            {
+                msg.type = "DRAW";
+                msg.color = Toolbar.CurrentColor;
+                msg.thickness = Toolbar.PencilSize;
+            }
+            if (p1.X == p2.X && p1.Y == p2.Y) return;
 
             ClientSocket.Instance.Send(msg);
         }
+        public void SendText(
+    string text,
+    Point position)
+        {
+            ClientSocket.Instance.Send(new DrawMessage
+            {
+                type = "TEXT",
 
+                roomId = RoomId,
+
+                userId = ClientSocket.Instance.CurrentUserId,
+
+                username = ClientSocket.Instance.CurrentUsername,
+
+                text = text,
+
+                x1 = position.X,
+                y1 = position.Y,
+
+                color = Toolbar.CurrentColor,
+
+                fontSize = Toolbar.CurrentThickness * 5
+            });
+        }
         private void ExecuteClearCanvas(object obj)
         {
             string safeUsername =
@@ -589,6 +620,20 @@ namespace DrawClient.ViewModels
                 : initials;
         }
 
+        private bool IsPenTool(string tool)
+        {
+            if (string.IsNullOrWhiteSpace(tool))
+                return false;
+
+            string t = tool.Trim().ToLowerInvariant();
+
+            return t == "pencil"
+                || t == "brush"
+                || t == "fountain"
+                || t == "highlighter"
+                || t == "laser";
+        }
+
         public void Cleanup()
         {
             if (_isCleanedUp)
@@ -597,6 +642,7 @@ namespace DrawClient.ViewModels
             _isCleanedUp = true;
 
             ClientSocket.Instance.OnMessageReceived -= HandleSocketMessage;
+
         }
     }
 }
