@@ -92,6 +92,7 @@
     <Compile Include="Converters\BoolToVisibilityConverter.cs" />
     <Compile Include="Converters\HexToBrushConverter.cs" />
     <Compile Include="Models\ChatMessage.cs" />
+    <Compile Include="Models\DrawAction.cs" />
     <Compile Include="Models\DrawMessage.cs" />
     <Compile Include="Models\HistoryMessage.cs" />
     <Compile Include="Models\LoginRequest.cs" />
@@ -102,6 +103,7 @@
     <Compile Include="Models\Room.cs" />
     <Compile Include="Models\ServerConfig .cs" />
     <Compile Include="Models\User.cs" />
+    <Compile Include="Services\UndoRedoManager.cs" />
     <Compile Include="ViewModels\Canvas\CanvasViewModel.cs" />
     <Compile Include="ViewModels\Canvas\ChatViewModel.cs" />
     <Compile Include="ViewModels\Canvas\ToolbarViewModel.cs" />
