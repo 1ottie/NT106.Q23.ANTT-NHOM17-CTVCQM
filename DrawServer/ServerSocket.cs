@@ -129,14 +129,16 @@ namespace DrawServer
                     Console.WriteLine($"Client {msg.userId} vào phòng: {msg.roomId}");
 
                     SendHistoryToClient(client, msg.roomId);
+                    SendChatHistoryToClient(client, msg.roomId);
                 }
                 else if (
-     msg.type == "DRAW" ||
-     msg.type == "ERASE" ||
-     msg.type == "SHAPE" ||
-     msg.type == "TEXT" ||
-     msg.type == "CLEAR"
- )
+                     msg.type == "DRAW" ||
+                     msg.type == "ERASE" ||
+                     msg.type == "SHAPE" ||
+                     msg.type == "TEXT" ||
+                     msg.type == "CLEAR" ||
+                     msg.type == "CHAT"
+                )
                 {
                     if (clientMetadata.TryGetValue(client, out var metadata))
                     {
@@ -150,7 +152,15 @@ namespace DrawServer
                     string updatedJson = JsonSerializer.Serialize(msg);
 
                     BroadcastToRoom(msg.roomId, updatedJson, client);
-                    SaveDrawAction(msg);
+
+                    if (msg.type == "CHAT")
+                    {
+                        SaveChatMessage(msg);
+                    }
+                    else
+                    {
+                        SaveDrawAction(msg);
+                    }
 
                 }
                 else if (msg.type == "LEAVE")
@@ -269,6 +279,36 @@ namespace DrawServer
             }
         }
 
+        private void SaveChatMessage(DrawMessage draw)
+        {
+            try
+            {
+                using (var conn = new MySqlConnection(connectionString))
+                {
+                    conn.Open();
+
+                    string sql = @"
+                        INSERT INTO Messages(user_id, room_id, content)
+                        VALUES(@uid, @rid, @msg)";
+
+                    using (var cmd = new MySqlCommand(sql, conn))
+                    {
+                        cmd.Parameters.AddWithValue("@uid", draw.userId);
+                        cmd.Parameters.AddWithValue("@rid", draw.roomId);
+                        cmd.Parameters.AddWithValue("@msg", draw.text);
+
+                        cmd.ExecuteNonQuery();
+                    }
+                }
+
+                Console.WriteLine("[CHAT SAVED]");
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine("[SAVE CHAT ERROR] " + ex.Message);
+            }
+        }
+
         private List<DrawMessage> LoadHistory(string roomId)
         {
             List<DrawMessage> history =
@@ -355,6 +395,89 @@ namespace DrawServer
             {
                 Console.WriteLine(
                     "[SEND HISTORY ERROR] " + ex.Message);
+            }
+        }
+
+        private List<DrawMessage> LoadChatHistory(string roomId)
+        {
+            List<DrawMessage> history = new List<DrawMessage>();
+
+            try
+            {
+                using (MySqlConnection conn =
+                    new MySqlConnection(connectionString))
+                {
+                    conn.Open();
+
+                    string sql = @"
+                SELECT m.content, m.created_at, u.username, m.user_id
+                FROM Messages m
+                JOIN Users u ON m.user_id = u.user_id
+                WHERE m.room_id = @room_id
+                ORDER BY m.created_at ASC";
+
+                    using (MySqlCommand cmd =
+                        new MySqlCommand(sql, conn))
+                    {
+                        cmd.Parameters.AddWithValue(
+                            "@room_id",
+                            int.Parse(roomId));
+
+                        using (var reader = cmd.ExecuteReader())
+                        {
+                            while (reader.Read())
+                            {
+                                history.Add(new DrawMessage
+                                {
+                                    type = "CHAT",
+                                    roomId = roomId,
+                                    userId = reader.GetInt32("user_id"),
+                                    username = reader.GetString("username"),
+                                    text = reader.GetString("content"),
+                                    timestamp = reader.GetDateTime("created_at")
+                                });
+                            }
+                        }
+                    }
+                }
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine(
+                    "[LOAD CHAT HISTORY ERROR] " + ex.Message);
+            }
+
+            return history;
+        }
+
+        private void SendChatHistoryToClient(TcpClient client, string roomId)
+        {
+            try
+            {
+                var history = LoadChatHistory(roomId);
+
+                var packet = new
+                {
+                    type = "CHAT_HISTORY",
+                    roomId = roomId,
+                    messages = history
+                };
+
+                string json =
+                    JsonSerializer.Serialize(packet) + "\n";
+
+                byte[] data =
+                    Encoding.UTF8.GetBytes(json);
+
+                client.GetStream().Write(data, 0, data.Length);
+
+                Console.WriteLine(
+                    $"Đã gửi {history.Count} chat messages");
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine(
+                    "[SEND CHAT HISTORY ERROR] " + ex.Message);
             }
         }
 

@@ -1192,27 +1192,175 @@
 
                         <TextBlock Grid.Row="0" Text="Live Chat" FontSize="15" FontWeight="Medium" Foreground="#202124" Margin="0,0,0,16"/>
 
-                        <ScrollViewer Grid.Row="1" VerticalScrollBarVisibility="Auto">
+                        <ScrollViewer x:Name="ChatScrollViewer" Grid.Row="1"
+              VerticalScrollBarVisibility="Auto"
+              HorizontalScrollBarVisibility="Disabled">
+
                             <ItemsControl ItemsSource="{Binding ChatMessages}">
                                 <ItemsControl.ItemTemplate>
                                     <DataTemplate>
-                                        <StackPanel Margin="0,0,0,12">
-                                            <StackPanel Orientation="Horizontal" Margin="0,0,0,2">
-                                                <TextBlock Text="{Binding User}" FontSize="12" FontWeight="Medium" Foreground="#202124"/>
-                                                <TextBlock Text="{Binding Time}" FontSize="12" Foreground="#5F6368" Margin="8,0,0,0"/>
-                                            </StackPanel>
-                                            <TextBlock Text="{Binding Message}" FontSize="13" Foreground="#5F6368" TextWrapping="Wrap"/>
+
+                                        <StackPanel>
+
+                                            <!-- Separator -->
+                                            <TextBlock x:Name="Separator"
+                               Text="{Binding FullDateTime}"
+                               Visibility="Collapsed"
+                               HorizontalAlignment="Center"
+                               Margin="0,8,0,14"
+                               FontSize="10"
+                               Foreground="#80868B"
+                               FontWeight="SemiBold"/>
+
+                                            <Grid Margin="0,0,0,14">
+
+                                                <!-- Người khác -->
+                                                <Grid x:Name="LeftMessage">
+                                                    <Grid.ColumnDefinitions>
+                                                        <ColumnDefinition Width="40"/>
+                                                        <ColumnDefinition Width="*"/>
+                                                    </Grid.ColumnDefinitions>
+
+                                                    <Border Width="32"
+                                    Height="32"
+                                    Background="#1A73E8"
+                                    CornerRadius="16"
+                                    VerticalAlignment="Top">
+
+                                                        <TextBlock Text="{Binding UserInitials}"
+                                           Foreground="White"
+                                           FontSize="14"
+                                           FontWeight="Medium"
+                                           HorizontalAlignment="Center"
+                                           VerticalAlignment="Center"/>
+                                                    </Border>
+
+                                                    <StackPanel Grid.Column="1"
+                                        Margin="8,0,0,0"
+                                        MaxWidth="240"
+                                        HorizontalAlignment="Left">
+
+                                                        <TextBlock Text="{Binding User}"
+                                           Margin="12,0,0,4"
+                                           FontSize="10"
+                                           Foreground="#80868B"
+                                           MaxWidth="180"
+                                           TextWrapping="Wrap"
+                                                                   FontWeight="Medium"/>
+
+                                                        <Border Background="#F1F3F4"
+                                        CornerRadius="14"
+                                        Padding="12,8"
+                                        HorizontalAlignment="Left">
+
+                                                            <TextBlock Text="{Binding Message}"
+                                               FontSize="13"
+                                               Foreground="#202124"
+                                               TextWrapping="Wrap"/>
+                                                        </Border>
+
+                                                        <TextBlock Text="{Binding Time}"
+                                           Margin="12,4,0,0"
+                                           FontSize="10"
+                                           Foreground="#80868B"/>
+
+                                                    </StackPanel>
+                                                </Grid>
+
+                                                <!-- Tin nhắn của mình -->
+                                                <Grid x:Name="RightMessage"
+                              Visibility="Collapsed">
+
+                                                    <Grid.ColumnDefinitions>
+                                                        <ColumnDefinition Width="*"/>
+                                                        <ColumnDefinition Width="40"/>
+                                                    </Grid.ColumnDefinitions>
+
+                                                    <StackPanel Grid.Column="0"
+                                        HorizontalAlignment="Right"
+                                        Margin="0,0,8,0"
+                                        MaxWidth="240">
+
+                                                        <TextBlock Text="{Binding User}"
+                                           Margin="0,0,12,4"
+                                           FontSize="10"
+                                           Foreground="#80868B"
+                                           MaxWidth="180"
+                                           TextWrapping="Wrap"
+                                           HorizontalAlignment="Right"
+                                                                   FontWeight="Medium"/>
+
+                                                        <Border Background="#D2E3FC"
+                                        CornerRadius="14"
+                                        Padding="12,8"
+                                        HorizontalAlignment="Right">
+
+                                                            <TextBlock Text="{Binding Message}"
+                                               FontSize="13"
+                                               Foreground="#202124"
+                                               TextWrapping="Wrap"/>
+                                                        </Border>
+
+                                                        <TextBlock Text="{Binding Time}"
+                                           HorizontalAlignment="Right"
+                                           Margin="0,4,12,0"
+                                           FontSize="10"
+                                           Foreground="#80868B"/>
+
+                                                    </StackPanel>
+
+                                                    <Border Grid.Column="1"
+                                    Width="32"
+                                    Height="32"
+                                    Background="#1A73E8"
+                                    CornerRadius="16"
+                                    VerticalAlignment="Top">
+
+                                                        <TextBlock Text="{Binding UserInitials}"
+                                           Foreground="White"
+                                           FontSize="14"
+                                           FontWeight="Medium"
+                                           HorizontalAlignment="Center"
+                                           VerticalAlignment="Center"/>
+                                                    </Border>
+
+                                                </Grid>
+
+                                            </Grid>
+
                                         </StackPanel>
+
+                                        <DataTemplate.Triggers>
+
+                                            <DataTrigger Binding="{Binding IsMine}" Value="True">
+                                                <Setter TargetName="LeftMessage"
+                                Property="Visibility"
+                                Value="Collapsed"/>
+                                                <Setter TargetName="RightMessage"
+                                Property="Visibility"
+                                Value="Visible"/>
+                                            </DataTrigger>
+
+                                            <DataTrigger Binding="{Binding ShowSeparator}" Value="True">
+                                                <Setter TargetName="Separator"
+                                Property="Visibility"
+                                Value="Visible"/>
+                                            </DataTrigger>
+
+                                        </DataTemplate.Triggers>
+
                                     </DataTemplate>
                                 </ItemsControl.ItemTemplate>
                             </ItemsControl>
+
                         </ScrollViewer>
 
                         <Border Grid.Row="2" BorderBrush="#DADCE0" BorderThickness="1" CornerRadius="4" Padding="12,8" Margin="0,16,0,0">
                             <Grid>
-                                <TextBox x:Name="txtChatInput" 
+                                <TextBox x:Name="txtChatInput" Text="{Binding CurrentChatMessage,
+         UpdateSourceTrigger=PropertyChanged}"
              Background="Transparent" BorderThickness="0" Foreground="#202124" FontSize="13" 
-             VerticalContentAlignment="Center" Margin="0,0,40,0"/>
+             VerticalContentAlignment="Center" Margin="0,0,40,0" KeyDown="txtChatInput_KeyDown"/>
 
                                 <TextBlock Text="Type a message..." Foreground="#9AA0A6" FontSize="13" 
                VerticalAlignment="Center" Margin="5,0,40,0" 
@@ -1230,7 +1378,7 @@
                                 </TextBlock>
 
                                 <Button HorizontalAlignment="Right" Background="Transparent" BorderThickness="0" 
-            Cursor="Hand" Panel.ZIndex="2" Style="{StaticResource VectorToolStyle}">
+            Cursor="Hand" Panel.ZIndex="2" Style="{StaticResource VectorToolStyle}" Command="{Binding SendChatMessageCommand}">
                                     <Path Data="M 22,2 L 11,13 M 22,2 L 15,22 L 11,13 L 2,9 Z"
       Stroke="#B0B3B8" 
       StrokeThickness="1.5"

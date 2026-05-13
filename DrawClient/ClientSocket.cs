@@ -226,7 +226,7 @@ namespace DrawClient
                         PropertyNameCaseInsensitive = true
                     };
 
-                    if (type == "HISTORY")
+                    if (type == "HISTORY" || type == "CHAT_HISTORY")
                     {
                         OnMessageReceived?.Invoke(msg);
                         return;
@@ -237,7 +237,8 @@ namespace DrawClient
                         type == "ERASE" ||
                         type == "SHAPE" ||
                         type == "TEXT" ||
-                        type == "CLEAR"
+                        type == "CLEAR" ||
+                        type == "CHAT"
                     )
                     {
                         OnMessageReceived?.Invoke(msg);

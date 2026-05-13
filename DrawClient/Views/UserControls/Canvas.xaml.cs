@@ -55,6 +55,16 @@ namespace DrawClient.Views.UserControls
             }
         }
 
+        private void ChatMessages_CollectionChanged(
+            object sender,
+            System.Collections.Specialized.NotifyCollectionChangedEventArgs e)
+                {
+                    Application.Current.Dispatcher.BeginInvoke(new Action(() =>
+                    {
+                        ChatScrollViewer?.ScrollToEnd();
+                    }));
+                }
+
         private void Canvas_DataContextChanged(object sender, DependencyPropertyChangedEventArgs e)
         {
             // 1. Unsubscribe VM cũ trước
@@ -84,6 +94,7 @@ namespace DrawClient.Views.UserControls
                 _viewModel.PropertyChanged += ViewModel_PropertyChanged;
                 _viewModel.OnShapeReceived += DrawShape;
                 _viewModel.OnTextReceived += DrawText;
+                _viewModel.ChatMessages.CollectionChanged += ChatMessages_CollectionChanged;
 
                 if (_viewModel.Toolbar != null)
                 {
@@ -761,5 +772,22 @@ namespace DrawClient.Views.UserControls
 
             return points;
         }
-    }
+
+        private void txtChatInput_KeyDown(
+            object sender,
+            KeyEventArgs e)
+                {
+                    if (e.Key == Key.Enter)
+                    {
+                        if (DataContext is CanvasViewModel vm)
+                        {
+                            vm.SendChatMessageCommand.Execute(null);
+                        }
+
+                        e.Handled = true;
+                    }
+                }
+        }
+        
+        
     }
