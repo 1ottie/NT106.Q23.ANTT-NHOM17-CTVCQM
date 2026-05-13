@@ -366,7 +366,8 @@
                        Margin="0,0,16,0"/>
 
                     <!-- Undo -->
-                    <Button Width="36"
+                    <Button Command="{Binding UndoCommand}"
+                    Width="36"
                     Height="36"
                     Background="Transparent"
                     BorderThickness="0"
@@ -390,7 +391,8 @@
                     </Button>
 
                     <!-- Redo -->
-                    <Button Width="36"
+                    <Button Command="{Binding UndoCommand}"
+                    Width="36"
                     Height="36"
                     Background="Transparent"
                     BorderThickness="0"
