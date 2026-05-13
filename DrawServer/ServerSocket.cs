@@ -15,7 +15,7 @@ namespace DrawServer
     public class ServerSocket
     {
         private string connectionString =
-            "server=localhost;database=online_Drawing_DB;user=root;password=182806";
+            "server=localhost;database=online_Drawing_DB;user=root;password=";
 
         private TcpListener server;
 
@@ -223,10 +223,7 @@ namespace DrawServer
             Console.WriteLine("roomId = " + msg.roomId);
             Console.WriteLine("userId = " + msg.userId);
             Console.WriteLine("type = " + msg.type);
-            if (msg.type == "DRAW" || msg.type == "ERASE")
-            {
-                DeleteOldTempActions(msg.roomId, msg.userId, msg.type);
-            }
+
             try
             {
                 using (MySqlConnection conn =
@@ -293,9 +290,11 @@ namespace DrawServer
                     using (MySqlCommand cmd =
                         new MySqlCommand(sql, conn))
                     {
+                        int roomIdInt = int.Parse(roomId);
+
                         cmd.Parameters.AddWithValue(
                             "@room_id",
-                            int.TryParse(roomId, out int roomIdInt));
+                            roomIdInt);
 
                         using (var reader =
                             cmd.ExecuteReader())
@@ -326,29 +325,6 @@ namespace DrawServer
             return history;
         }
 
-        private void DeleteOldTempActions(string roomId, int userId, string type)
-        {
-            using (var conn = new MySqlConnection(connectionString))
-            {
-                conn.Open();
-
-                string sql = @"
-            DELETE FROM DrawActions
-            WHERE room_id = @roomId
-            AND user_id = @userId
-            AND type = @type";
-
-                using (var cmd = new MySqlCommand(sql, conn))
-                {
-                    cmd.Parameters.AddWithValue("@roomId", int.TryParse(roomId, out int roomIdInt));
-                    cmd.Parameters.AddWithValue("@userId", userId);
-                    cmd.Parameters.AddWithValue("@type", type);
-
-                    cmd.ExecuteNonQuery();
-                }
-
-            }
-        }
         private void SendHistoryToClient(TcpClient client, string roomId)
         {
             try
