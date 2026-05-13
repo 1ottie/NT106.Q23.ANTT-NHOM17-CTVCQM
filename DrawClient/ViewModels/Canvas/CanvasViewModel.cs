@@ -177,7 +177,7 @@ namespace DrawClient.ViewModels
                 ExecuteSelectTool(toolType);
             };
 
-             InitSocketListener();
+            InitSocketListener();
 
             LeaveRoomCommand = new RelayCommand(ExecuteLeaveRoom);
             ShowRoomInfoCommand = new RelayCommand(ExecuteShowRoomInfo);
@@ -288,7 +288,7 @@ namespace DrawClient.ViewModels
                 }
             });
 
-             ChangePenTypeCommand = new RelayCommand(penType =>
+            ChangePenTypeCommand = new RelayCommand(penType =>
             {
                 if (penType is string type)
                 {
@@ -610,7 +610,7 @@ namespace DrawClient.ViewModels
             };
 
             // 3. Gán Type NHẤT QUÁN (Sửa lỗi mục 1)
-                       if (isEraser)
+            if (isEraser)
             {
                 msg.type = "ERASE";
                 msg.color = "#ERASE";
@@ -776,36 +776,6 @@ namespace DrawClient.ViewModels
 
             ClientSocket.Instance.OnMessageReceived -= HandleSocketMessage;
             UndoRedoManager.OnHistoryChanged -= UpdateHistoryUI;   // THÊM DÒNG NÀY
-        }
-
-        private string _currentChatMessage;
-
-        public string CurrentChatMessage
-        {
-            get => _currentChatMessage;
-            set
-            {
-                _currentChatMessage = value;
-                OnPropertyChanged();
-            }
-        }
-
-        private void ExecuteSendChatMessage()
-        {
-            if (string.IsNullOrWhiteSpace(CurrentChatMessage))
-                return;
-
-            ClientSocket.Instance.Send(new DrawMessage
-            {
-                type = "CHAT",
-                roomId = RoomId,
-                userId = ClientSocket.Instance.CurrentUserId,
-                username = ClientSocket.Instance.CurrentUsername,
-                text = CurrentChatMessage.Trim(),
-                timestamp = DateTime.Now
-            });
-
-            CurrentChatMessage = "";
         }
 
         private string _currentChatMessage;
