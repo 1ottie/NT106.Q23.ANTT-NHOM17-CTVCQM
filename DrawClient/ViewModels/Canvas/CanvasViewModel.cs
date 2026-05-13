@@ -3,13 +3,13 @@ using DrawClient.ViewModels.Canvas;
 using System;
 using System.Collections.ObjectModel;
 using System.ComponentModel;
+using System.Linq;
 using System.Runtime.CompilerServices;
 using System.Text.Json;
 using System.Windows;
 using System.Windows.Controls;
-using System.Windows.Input;
 using System.Windows.Ink;
-
+using System.Windows.Input;
 
 namespace DrawClient.ViewModels
 {
@@ -17,13 +17,6 @@ namespace DrawClient.ViewModels
     {
         public string Initials { get; set; } = "";
         public string ColorHex { get; set; } = "";
-    }
-
-    public class ChatMessage
-    {
-        public string User { get; set; } = "";
-        public string Message { get; set; } = "";
-        public string Time { get; set; } = "";
     }
 
     public class CanvasViewModel : INotifyPropertyChanged
@@ -37,6 +30,7 @@ namespace DrawClient.ViewModels
         public Action GoBackToLobby;
 
         private bool _isCleanedUp = false;
+
 
         #region Properties
         private string _roomName;
@@ -133,6 +127,7 @@ namespace DrawClient.ViewModels
         public ICommand ChangePenTypeCommand { get; }
         public ICommand ChangeThicknessCommand { get; }
         public ICommand ChangeShapeCommand { get; } // Lệnh đổi hình dạng
+        public ICommand SendChatMessageCommand { get; }
         #endregion
         public ObservableCollection<UserParticipant> Users { get; set; }
         public ObservableCollection<string> NetworkLogs { get; set; }
@@ -296,6 +291,8 @@ namespace DrawClient.ViewModels
                     CurrentEditingMode = InkCanvasEditingMode.None;
                 }
             });
+
+            SendChatMessageCommand = new RelayCommand(_ => ExecuteSendChatMessage());
         }
 
         private void ExecuteSelectTool(object obj)
@@ -430,6 +427,25 @@ namespace DrawClient.ViewModels
                         return;
                     }
 
+                    if (type == "CHAT_HISTORY")
+                    {
+                        if (!doc.RootElement.TryGetProperty("messages", out var messages))
+                            return;
+
+                        foreach (var item in messages.EnumerateArray())
+                        {
+                            var chat = JsonSerializer.Deserialize<DrawMessage>(
+                                item.GetRawText(),
+                                _jsonOptions);
+
+                            if (chat == null) continue;
+
+                            DispatchDraw(chat);
+                        }
+
+                        return;
+                    }
+
                     // ================= NORMAL MESSAGE =================
                     var drawMsg = JsonSerializer.Deserialize<DrawMessage>(msg, _jsonOptions);
                     if (drawMsg == null) return;
@@ -480,8 +496,43 @@ namespace DrawClient.ViewModels
                 case "LEAVE":
                     break;
 
-                default:
-                    Console.WriteLine($"Unknown type: {draw.type}");
+                case "CHAT":
+                    InvokeUI(() =>
+                    {
+                        DateTime messageTime =
+                            draw.timestamp == default
+                                ? DateTime.Now
+                                : draw.timestamp;
+
+                        bool showSeparator = false;
+
+                        if (ChatMessages.Count == 0)
+                        {
+                            showSeparator = true;
+                        }
+                        else
+                        {
+                            var last = ChatMessages.Last();
+
+                            bool differentDay =
+                                last.Timestamp.Date != messageTime.Date;
+
+                            bool over15Minutes =
+                                (messageTime - last.Timestamp).TotalMinutes >= 15;
+
+                            if (differentDay || over15Minutes)
+                                showSeparator = true;
+                        }
+
+                        ChatMessages.Add(new ChatMessage
+                        {
+                            User = draw.username,
+                            Message = draw.text,
+                            Timestamp = messageTime,
+                            ShowSeparator = showSeparator,
+                            IsMine = draw.userId == ClientSocket.Instance.CurrentUserId
+                        });
+                    });
                     break;
             }
         }
@@ -654,6 +705,36 @@ namespace DrawClient.ViewModels
 
             ClientSocket.Instance.OnMessageReceived -= HandleSocketMessage;
 
+        }
+
+        private string _currentChatMessage;
+
+        public string CurrentChatMessage
+        {
+            get => _currentChatMessage;
+            set
+            {
+                _currentChatMessage = value;
+                OnPropertyChanged();
+            }
+        }
+
+        private void ExecuteSendChatMessage()
+        {
+            if (string.IsNullOrWhiteSpace(CurrentChatMessage))
+                return;
+
+            ClientSocket.Instance.Send(new DrawMessage
+            {
+                type = "CHAT",
+                roomId = RoomId,
+                userId = ClientSocket.Instance.CurrentUserId,
+                username = ClientSocket.Instance.CurrentUsername,
+                text = CurrentChatMessage.Trim(),
+                timestamp = DateTime.Now
+            });
+
+            CurrentChatMessage = "";
         }
     }
 }

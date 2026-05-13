@@ -2,8 +2,16 @@
              xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
              xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
              xmlns:local="clr-namespace:DrawClient"
+             xmlns:converters="clr-namespace:DrawClient.Converters"
              StartupUri="MainWindow.xaml">
     <Application.Resources>
-         
+
+        <ResourceDictionary>
+
+            <converters:BoolToVisibilityConverter
+            x:Key="BoolToVisibilityConverter"/>
+
+        </ResourceDictionary>
+
     </Application.Resources>
 </Application>

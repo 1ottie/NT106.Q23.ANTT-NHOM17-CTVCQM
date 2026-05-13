@@ -27,5 +27,6 @@ namespace DrawClient
         // CHAT
         public string username { get; set; }
         public string content { get; set; }
+        public DateTime timestamp { get; set; }
     }
 }

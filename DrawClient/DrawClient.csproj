@@ -89,8 +89,9 @@
       <Generator>MSBuild:Compile</Generator>
       <SubType>Designer</SubType>
     </ApplicationDefinition>
-    <Compile Include="Converters\BoolToVis\Converter.cs" />
+    <Compile Include="Converters\BoolToVisibilityConverter.cs" />
     <Compile Include="Converters\HexToBrushConverter.cs" />
+    <Compile Include="Models\ChatMessage.cs" />
     <Compile Include="Models\DrawMessage.cs" />
     <Compile Include="Models\HistoryMessage.cs" />
     <Compile Include="Models\LoginRequest.cs" />
