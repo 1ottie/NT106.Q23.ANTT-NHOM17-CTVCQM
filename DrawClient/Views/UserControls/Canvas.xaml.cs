@@ -2,11 +2,14 @@
 using System;
 using System.Collections.Generic;
 using System.ComponentModel;
+using System.Net.NetworkInformation;
 using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Ink;
 using System.Windows.Input;
 using System.Windows.Media;
+using DrawClient.Models;
+using System.Linq;
 
 namespace DrawClient.Views.UserControls
 {
@@ -55,6 +58,16 @@ namespace DrawClient.Views.UserControls
             }
         }
 
+        private void ChatMessages_CollectionChanged(
+            object sender,
+            System.Collections.Specialized.NotifyCollectionChangedEventArgs e)
+                {
+                    Application.Current.Dispatcher.BeginInvoke(new Action(() =>
+                    {
+                        ChatScrollViewer?.ScrollToEnd();
+                    }));
+                }
+
         private void Canvas_DataContextChanged(object sender, DependencyPropertyChangedEventArgs e)
         {
             // 1. Unsubscribe VM cũ trước
@@ -84,6 +97,7 @@ namespace DrawClient.Views.UserControls
                 _viewModel.PropertyChanged += ViewModel_PropertyChanged;
                 _viewModel.OnShapeReceived += DrawShape;
                 _viewModel.OnTextReceived += DrawText;
+                _viewModel.ChatMessages.CollectionChanged += ChatMessages_CollectionChanged;
 
                 if (_viewModel.Toolbar != null)
                 {
@@ -92,6 +106,72 @@ namespace DrawClient.Views.UserControls
                 }
 
                 UpdateCurrentDrawingAttributes(_viewModel);
+                 _viewModel.OnUndoRedo += RedrawAllFromActions;
+            }
+        }
+
+                    private void RedrawAllFromActions()
+        {
+            Application.Current.Dispatcher.Invoke(() =>
+            {
+                MyCanvas.Strokes.Clear();
+                if (_viewModel == null) return;
+                var actions = _viewModel.UndoRedoManager.GetAllActions().ToList();
+                foreach (var action in actions)
+                {
+                    DrawSingleAction(action);
+                }
+            });
+        }
+
+        private void DrawSingleAction(DrawAction action)
+        {
+            switch (action.ActionType)
+            {
+                case "DRAW":
+                    DrawLineLocal(action.StartPoint, action.EndPoint, action.Color, action.Thickness);
+                    break;
+                case "SHAPE":
+                    var points = CreateShapePointsFromAction(action);
+                    if (points != null)
+                    {
+                        var stroke = new Stroke(points)
+                        {
+                            DrawingAttributes = new DrawingAttributes
+                            {
+                                Color = (Color)ColorConverter.ConvertFromString(action.Color),
+                                Width = action.Thickness,
+                                Height = action.Thickness,
+                                FitToCurve = false,
+                                IgnorePressure = true
+                            }
+                        };
+                        MyCanvas.Strokes.Add(stroke);
+                    }
+                    break;
+                // ERASE không cần xử lý vì nét đó đã bị xóa khỏi danh sách action
+            }
+        }
+
+        private StylusPointCollection CreateShapePointsFromAction(DrawAction action)
+        {
+            Point start = action.StartPoint;
+            Point end = action.EndPoint;
+            string shapeType = action.ShapeType?.ToLower();
+            switch (shapeType)
+            {
+                case "rectangle":
+                case "square":
+                    return CreateRectanglePoints(start, end);
+                case "circle":
+                case "ellipse":
+                    return CreateEllipsePoints(start, end);
+                case "triangle":
+                    return CreateTrianglePoints(start, end);
+                case "line":
+                    return CreateLinePoints(start, end);
+                default:
+                    return null;
             }
         }
 
@@ -761,5 +841,22 @@ namespace DrawClient.Views.UserControls
 
             return points;
         }
-    }
+
+        private void txtChatInput_KeyDown(
+            object sender,
+            KeyEventArgs e)
+                {
+                    if (e.Key == Key.Enter)
+                    {
+                        if (DataContext is CanvasViewModel vm)
+                        {
+                            vm.SendChatMessageCommand.Execute(null);
+                        }
+
+                        e.Handled = true;
+                    }
+                }
+        }
+        
+        
     }

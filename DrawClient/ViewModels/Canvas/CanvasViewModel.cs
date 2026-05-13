@@ -1,15 +1,21 @@
 ﻿using DrawClient.Models;
 using DrawClient.ViewModels.Canvas;
+using DrawClient.Services;
 using System;
 using System.Collections.ObjectModel;
 using System.ComponentModel;
+using System.Linq;
 using System.Runtime.CompilerServices;
 using System.Text.Json;
 using System.Windows;
 using System.Windows.Controls;
-using System.Windows.Input;
 using System.Windows.Ink;
+<<<<<<< HEAD
+using System.Linq;
 
+=======
+using System.Windows.Input;
+>>>>>>> 6110b019aba73ee0486c46174744222eccebf6a9
 
 namespace DrawClient.ViewModels
 {
@@ -17,13 +23,6 @@ namespace DrawClient.ViewModels
     {
         public string Initials { get; set; } = "";
         public string ColorHex { get; set; } = "";
-    }
-
-    public class ChatMessage
-    {
-        public string User { get; set; } = "";
-        public string Message { get; set; } = "";
-        public string Time { get; set; } = "";
     }
 
     public class CanvasViewModel : INotifyPropertyChanged
@@ -35,8 +34,10 @@ namespace DrawClient.ViewModels
         public Action<DrawMessage> OnTextReceived;
         public Action OnCanvasCleared;
         public Action GoBackToLobby;
-
+        public UndoRedoManager UndoRedoManager { get; private set; } = new UndoRedoManager();
+        public event Action OnUndoRedo; 
         private bool _isCleanedUp = false;
+
 
         #region Properties
         private string _roomName;
@@ -116,6 +117,27 @@ namespace DrawClient.ViewModels
         }
 
         private string _previousColor = "#000000";
+
+                private bool _canUndo = false;
+                public bool CanUndo
+                {
+                    get => _canUndo;
+                    set { _canUndo = value; OnPropertyChanged(); }
+                }
+
+                private bool _canRedo = false;
+                public bool CanRedo
+                {
+                    get => _canRedo;
+                    set { _canRedo = value; OnPropertyChanged(); }
+                }
+
+                private string _historyInfo = "History: 0 Undo | 0 Redo";
+                public string HistoryInfo
+                {
+                    get => _historyInfo;
+                    set { _historyInfo = value; OnPropertyChanged(); }
+                }
         #endregion
 
         #region Commands
@@ -133,6 +155,14 @@ namespace DrawClient.ViewModels
         public ICommand ChangePenTypeCommand { get; }
         public ICommand ChangeThicknessCommand { get; }
         public ICommand ChangeShapeCommand { get; } // Lệnh đổi hình dạng
+<<<<<<< HEAD
+        public ICommand UndoCommand { get; }
+        public ICommand RedoCommand { get; }
+        public ICommand ClearHistoryCommand { get; }
+        
+=======
+        public ICommand SendChatMessageCommand { get; }
+>>>>>>> 6110b019aba73ee0486c46174744222eccebf6a9
         #endregion
         public ObservableCollection<UserParticipant> Users { get; set; }
         public ObservableCollection<string> NetworkLogs { get; set; }
@@ -153,7 +183,7 @@ namespace DrawClient.ViewModels
                 ExecuteSelectTool(toolType);
             };
 
-            InitSocketListener();
+             InitSocketListener();
 
             LeaveRoomCommand = new RelayCommand(ExecuteLeaveRoom);
             ShowRoomInfoCommand = new RelayCommand(ExecuteShowRoomInfo);
@@ -199,6 +229,15 @@ namespace DrawClient.ViewModels
             });
 
             ClearCanvasCommand = new RelayCommand(ExecuteClearCanvas);
+            // Undo/Redo
+            UndoRedoManager.OnUndo += (action) => OnUndoRedo?.Invoke();
+            UndoRedoManager.OnRedo += (action) => OnUndoRedo?.Invoke();
+            UndoRedoManager.OnHistoryChanged += UpdateHistoryUI;
+            UpdateHistoryUI();
+
+            UndoCommand = new RelayCommand(_ => ExecuteUndo(), _ => CanUndo);
+            RedoCommand = new RelayCommand(_ => ExecuteRedo(), _ => CanRedo);
+            ClearHistoryCommand = new RelayCommand(_ => ExecuteClearHistory());
 
             string safeUsername =
                 LoginViewModel.CurrentUsername
@@ -255,22 +294,30 @@ namespace DrawClient.ViewModels
                 }
             });
 
-            ChangePenTypeCommand = new RelayCommand(penType =>
+             ChangePenTypeCommand = new RelayCommand(penType =>
             {
                 if (penType is string type)
                 {
                     CurrentPenType = type;
                     Toolbar.CurrentPenType = type;
 
-                    SelectedTool = "pen";
-                    Toolbar.IsPencilSelected = true;   // Bật bút
-                    Toolbar.IsEraserSelected = false;  // Tắt tẩy
-
-                    CurrentEditingMode = InkCanvasEditingMode.Ink;
+                    var shapes = new[] { "rectangle", "circle", "triangle", "line", "square", "ellipse" };
+                    if (shapes.Any(s => string.Equals(s, type, StringComparison.OrdinalIgnoreCase)))
+                    {
+                        CurrentShape = type;
+                        SelectedTool = "shape";
+                        CurrentEditingMode = InkCanvasEditingMode.None;
+                    }
+                    else
+                    {
+                        SelectedTool = "pen";
+                        Toolbar.IsPencilSelected = true;
+                        Toolbar.IsEraserSelected = false;
+                        CurrentEditingMode = InkCanvasEditingMode.Ink;
+                    }
                     IsPenMenuOpen = false;
                 }
             });
-
             ChangeThicknessCommand = new RelayCommand(thickness =>
             {
                 if (double.TryParse(thickness.ToString(), out double t))
@@ -296,6 +343,8 @@ namespace DrawClient.ViewModels
                     CurrentEditingMode = InkCanvasEditingMode.None;
                 }
             });
+
+            SendChatMessageCommand = new RelayCommand(_ => ExecuteSendChatMessage());
         }
 
         private void ExecuteSelectTool(object obj)
@@ -430,6 +479,25 @@ namespace DrawClient.ViewModels
                         return;
                     }
 
+                    if (type == "CHAT_HISTORY")
+                    {
+                        if (!doc.RootElement.TryGetProperty("messages", out var messages))
+                            return;
+
+                        foreach (var item in messages.EnumerateArray())
+                        {
+                            var chat = JsonSerializer.Deserialize<DrawMessage>(
+                                item.GetRawText(),
+                                _jsonOptions);
+
+                            if (chat == null) continue;
+
+                            DispatchDraw(chat);
+                        }
+
+                        return;
+                    }
+
                     // ================= NORMAL MESSAGE =================
                     var drawMsg = JsonSerializer.Deserialize<DrawMessage>(msg, _jsonOptions);
                     if (drawMsg == null) return;
@@ -480,8 +548,43 @@ namespace DrawClient.ViewModels
                 case "LEAVE":
                     break;
 
-                default:
-                    Console.WriteLine($"Unknown type: {draw.type}");
+                case "CHAT":
+                    InvokeUI(() =>
+                    {
+                        DateTime messageTime =
+                            draw.timestamp == default
+                                ? DateTime.Now
+                                : draw.timestamp;
+
+                        bool showSeparator = false;
+
+                        if (ChatMessages.Count == 0)
+                        {
+                            showSeparator = true;
+                        }
+                        else
+                        {
+                            var last = ChatMessages.Last();
+
+                            bool differentDay =
+                                last.Timestamp.Date != messageTime.Date;
+
+                            bool over15Minutes =
+                                (messageTime - last.Timestamp).TotalMinutes >= 15;
+
+                            if (differentDay || over15Minutes)
+                                showSeparator = true;
+                        }
+
+                        ChatMessages.Add(new ChatMessage
+                        {
+                            User = draw.username,
+                            Message = draw.text,
+                            Timestamp = messageTime,
+                            ShowSeparator = showSeparator,
+                            IsMine = draw.userId == ClientSocket.Instance.CurrentUserId
+                        });
+                    });
                     break;
             }
         }
@@ -513,11 +616,12 @@ namespace DrawClient.ViewModels
             };
 
             // 3. Gán Type NHẤT QUÁN (Sửa lỗi mục 1)
-            if (isEraser)
+                       if (isEraser)
             {
                 msg.type = "ERASE";
                 msg.color = "#ERASE";
                 msg.thickness = Toolbar.EraserSize;
+                UndoRedoManager.AddAction(new DrawAction("ERASE", p1, p2, msg.color, msg.thickness, ClientSocket.Instance.CurrentUserId, ClientSocket.Instance.CurrentUsername, RoomId));
             }
             else if (isShape)
             {
@@ -525,12 +629,14 @@ namespace DrawClient.ViewModels
                 msg.shapeType = CurrentShape;
                 msg.color = Toolbar.CurrentColor;
                 msg.thickness = Toolbar.PencilSize;
+                UndoRedoManager.AddAction(new DrawAction("SHAPE", p1, p2, msg.color, msg.thickness, ClientSocket.Instance.CurrentUserId, ClientSocket.Instance.CurrentUsername, RoomId) { ShapeType = CurrentShape });
             }
             else
             {
                 msg.type = "DRAW";
                 msg.color = Toolbar.CurrentColor;
                 msg.thickness = Toolbar.PencilSize;
+                UndoRedoManager.AddAction(new DrawAction("DRAW", p1, p2, msg.color, msg.thickness, ClientSocket.Instance.CurrentUserId, ClientSocket.Instance.CurrentUsername, RoomId));
             }
             if (p1.X == p2.X && p1.Y == p2.Y) return;
 
@@ -645,6 +751,28 @@ namespace DrawClient.ViewModels
                 || t == "laser";
         }
 
+        private void ExecuteUndo()
+        {
+            UndoRedoManager.Undo();
+        }
+
+        private void ExecuteRedo()
+        {
+            UndoRedoManager.Redo();
+        }
+
+        private void ExecuteClearHistory()
+        {
+            UndoRedoManager.Clear();
+            UpdateHistoryUI();
+        }
+
+        private void UpdateHistoryUI()
+        {
+            CanUndo = UndoRedoManager.CanUndo();
+            CanRedo = UndoRedoManager.CanRedo();
+            HistoryInfo = $"History: {UndoRedoManager.UndoCount} Undo | {UndoRedoManager.RedoCount} Redo";
+        }
         public void Cleanup()
         {
             if (_isCleanedUp)
@@ -653,7 +781,37 @@ namespace DrawClient.ViewModels
             _isCleanedUp = true;
 
             ClientSocket.Instance.OnMessageReceived -= HandleSocketMessage;
+            UndoRedoManager.OnHistoryChanged -= UpdateHistoryUI;   // THÊM DÒNG NÀY
+        }
 
+        private string _currentChatMessage;
+
+        public string CurrentChatMessage
+        {
+            get => _currentChatMessage;
+            set
+            {
+                _currentChatMessage = value;
+                OnPropertyChanged();
+            }
+        }
+
+        private void ExecuteSendChatMessage()
+        {
+            if (string.IsNullOrWhiteSpace(CurrentChatMessage))
+                return;
+
+            ClientSocket.Instance.Send(new DrawMessage
+            {
+                type = "CHAT",
+                roomId = RoomId,
+                userId = ClientSocket.Instance.CurrentUserId,
+                username = ClientSocket.Instance.CurrentUsername,
+                text = CurrentChatMessage.Trim(),
+                timestamp = DateTime.Now
+            });
+
+            CurrentChatMessage = "";
         }
     }
 }
