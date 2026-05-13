@@ -1,4 +1,5 @@
-﻿using System.Text.Json.Serialization;
+﻿using System;
+using System.Text.Json.Serialization;
 
 namespace DrawServer
 {
@@ -27,5 +28,6 @@ namespace DrawServer
         // Dữ liệu chat
         public string username { get; set; }
         public string content { get; set; }
+        public DateTime timestamp { get; set; }
     }
 }

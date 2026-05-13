@@ -10,12 +10,7 @@ using System.Text.Json;
 using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Ink;
-<<<<<<< HEAD
-using System.Linq;
-
-=======
 using System.Windows.Input;
->>>>>>> 6110b019aba73ee0486c46174744222eccebf6a9
 
 namespace DrawClient.ViewModels
 {
@@ -155,14 +150,13 @@ namespace DrawClient.ViewModels
         public ICommand ChangePenTypeCommand { get; }
         public ICommand ChangeThicknessCommand { get; }
         public ICommand ChangeShapeCommand { get; } // Lệnh đổi hình dạng
-<<<<<<< HEAD
+
         public ICommand UndoCommand { get; }
         public ICommand RedoCommand { get; }
         public ICommand ClearHistoryCommand { get; }
         
-=======
         public ICommand SendChatMessageCommand { get; }
->>>>>>> 6110b019aba73ee0486c46174744222eccebf6a9
+
         #endregion
         public ObservableCollection<UserParticipant> Users { get; set; }
         public ObservableCollection<string> NetworkLogs { get; set; }
@@ -782,6 +776,36 @@ namespace DrawClient.ViewModels
 
             ClientSocket.Instance.OnMessageReceived -= HandleSocketMessage;
             UndoRedoManager.OnHistoryChanged -= UpdateHistoryUI;   // THÊM DÒNG NÀY
+        }
+
+        private string _currentChatMessage;
+
+        public string CurrentChatMessage
+        {
+            get => _currentChatMessage;
+            set
+            {
+                _currentChatMessage = value;
+                OnPropertyChanged();
+            }
+        }
+
+        private void ExecuteSendChatMessage()
+        {
+            if (string.IsNullOrWhiteSpace(CurrentChatMessage))
+                return;
+
+            ClientSocket.Instance.Send(new DrawMessage
+            {
+                type = "CHAT",
+                roomId = RoomId,
+                userId = ClientSocket.Instance.CurrentUserId,
+                username = ClientSocket.Instance.CurrentUsername,
+                text = CurrentChatMessage.Trim(),
+                timestamp = DateTime.Now
+            });
+
+            CurrentChatMessage = "";
         }
 
         private string _currentChatMessage;
