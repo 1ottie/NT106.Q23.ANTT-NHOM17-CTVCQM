@@ -13,4 +13,3 @@ Release/
 
 # Logs
 *.log
-/DrawClient/ViewModels/MainViewModel.cs
