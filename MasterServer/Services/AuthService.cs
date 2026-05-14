@@ -1,6 +1,8 @@
-using MySql.Data.MySqlClient;
+﻿using MySql.Data.MySqlClient;
 using Dapper;
 using BCrypt.Net;
+using Microsoft.Extensions.Configuration;
+using System;
 
 public class AuthService
 {
@@ -9,7 +11,8 @@ public class AuthService
 
     public AuthService(IConfiguration configuration, JwtHelper jwtHelper)
     {
-        _connectionString = configuration.GetConnectionString("DefaultConnection");
+        _connectionString = configuration.GetConnectionString("DefaultConnection") 
+                            ?? throw new InvalidOperationException("Không tìm thấy cấu hình 'DefaultConnection' trong appsettings.json.");
         _jwtHelper = jwtHelper;
     }
 
@@ -37,22 +40,37 @@ public class AuthService
         return true;
     }
 
-    public (User, string) Login(LoginRequest req)
+    public (User?, string) Login(LoginRequest req)
     {
-        using var conn = new MySqlConnection(_connectionString);
+        try
+        {
+            using var conn = new MySqlConnection(_connectionString);
 
-        var user = conn.QueryFirstOrDefault<User>(
-            "SELECT * FROM Users WHERE username = @username",
-            new { req.username });
+            var user = conn.QueryFirstOrDefault<User>(
+                "SELECT * FROM Users WHERE username = @username",
+                new { req.username });
 
-        if (user == null) return (null, null);
+            if (user == null)
+                return (null, "Tài khoản không tồn tại.");
 
-        bool valid = BCrypt.Net.BCrypt.Verify(req.password, user.password_hash);
+            bool valid = BCrypt.Net.BCrypt.Verify(req.password, user.password_hash);
 
-        if (!valid) return (null, null);
+            if (!valid)
+                return (null, "Mật khẩu không chính xác.");
 
-        var jwt = _jwtHelper.GenerateToken(user);
+            var jwt = _jwtHelper.GenerateToken(user);
 
-        return (user, jwt);
+            return (user, jwt);
+        }
+        catch (MySql.Data.MySqlClient.MySqlException mySqlEx)
+        {
+            Console.WriteLine($"[DB ERROR] Lỗi Database tại hàm Login: {mySqlEx.Message}");
+            return (null, "Lỗi hệ thống: Không thể kết nối hoặc truy vấn cơ sở dữ liệu.");
+        }
+        catch (Exception ex)
+        {
+            Console.WriteLine($"[ERROR] Lỗi hệ thống tại hàm Login: {ex.Message}");
+            return (null, "Đã xảy ra lỗi không xác định. Vui lòng thử lại sau.");
+        }
     }
 }
