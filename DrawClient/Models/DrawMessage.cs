@@ -15,6 +15,7 @@ namespace DrawClient
 
         public string color { get; set; }
         public double thickness { get; set; }
+        public string penType { get; set; }
 
         // SHAPE
         public string shapeType { get; set; }

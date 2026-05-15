@@ -413,7 +413,7 @@ namespace DrawClient.ViewModels
                     // FIX NULL CRASH
                     if (result == null || result.node == null)
                     {
-                        MessageBox.Show(
+                                MessageBox.Show(
                             "Dữ liệu phòng không hợp lệ.");
                         return;
                     }
@@ -445,11 +445,12 @@ namespace DrawClient.ViewModels
                             result.Id,
                             result.room_name,
                             password);
+                       
                     }
                     else
                     {
                         MessageBox.Show(
-                            "Không thể kết nối tới node.");
+                            "Dữ liệu phòng từ Server trả về không hợp lệ.");
                     }
                 }
                 else

@@ -16,6 +16,8 @@ namespace DrawClient
         private Thread receiveThread;
 
         public Action<string> OnMessageReceived;
+        // Khóa đồng bộ tránh lỗi xung đột luồng khi xử lý chuỗi gói tin
+        private readonly object _bufferLock = new object();
         private StringBuilder buffer = new StringBuilder();
         private string currentRoomId;
 
@@ -83,6 +85,11 @@ namespace DrawClient
                 client.Connect(nodeIp, nodePort);
 
                 stream = client.GetStream();
+                // Reset bộ đệm chuỗi sạch sẽ trước khi nhận dữ liệu phòng mới
+                lock (_bufferLock)
+                {
+                    buffer.Clear();
+                }
 
                 _isRunning = true;
 
@@ -148,6 +155,23 @@ namespace DrawClient
                 username = CurrentUsername
             });
         }
+        // Hàm chủ động rời phòng cho Client bấm nút Thoát
+        public void LeaveRoom()
+        {
+            if (client == null || !client.Connected || string.IsNullOrEmpty(currentRoomId)) return;
+
+            // Gửi gói tin LEAVE báo cho Server biết tôi chủ động thoát
+            Send(new DrawMessage
+            {
+                type = "LEAVE",
+                roomId = currentRoomId,
+                userId = CurrentUserId,
+                username = CurrentUsername
+            });
+
+            currentRoomId = null;
+            Disconnect(); // Sau khi báo Server thì tự ngắt kết nối socket luôn
+        }
 
         #region RECEIVE
         private void ReceiveLoop()
@@ -164,25 +188,35 @@ namespace DrawClient
                     int len = stream.Read(receiveBuffer, 0, receiveBuffer.Length);
                     if (len <= 0) break;
 
-                    buffer.Append(Encoding.UTF8.GetString(receiveBuffer, 0, len));
-
-                    while (true)
+                    lock (_bufferLock)
                     {
-                        string content = buffer.ToString();
-                        int index = content.IndexOf('\n');
+                        buffer.Append(Encoding.UTF8.GetString(receiveBuffer, 0, len));
 
-                        if (index < 0) break;
+                        while (true)
+                        {
+                            string content = buffer.ToString();
+                            int index = content.IndexOf('\n');
+                            if (index < 0) break;
 
-                        string msg = content.Substring(0, index);
-                        buffer.Remove(0, index + 1);
+                            string msg = content.Substring(0, index);
+                            buffer.Remove(0, index + 1);
 
-                        HandleMessage(msg);
+                            // Đẩy dữ liệu ra UI an toàn
+                            if (!string.IsNullOrWhiteSpace(msg))
+                            {
+                                HandleMessage(msg);
+                            }
+                        }
                     }
                 }
             }
             catch (Exception ex)
             {
                 Console.WriteLine("RECEIVE ERROR: " + ex.Message);
+            }
+            finally
+            {
+                Disconnect();
             }
         }
         #endregion
@@ -199,8 +233,12 @@ namespace DrawClient
 
                 byte[] data = Encoding.UTF8.GetBytes(json);
 
-                stream.Write(data, 0, data.Length);
-                stream.Flush();
+                // Gửi dữ liệu bất tuần tự an toàn
+                lock (stream)
+                {
+                    stream.Write(data, 0, data.Length);
+                    stream.Flush();
+                }
             }
             catch (Exception ex)
             {
@@ -226,19 +264,19 @@ namespace DrawClient
                         PropertyNameCaseInsensitive = true
                     };
 
-                    if (type == "HISTORY" || type == "CHAT_HISTORY")
-                    {
-                        OnMessageReceived?.Invoke(msg);
-                        return;
-                    }
+                    
 
                     if (
+                        type == "HISTORY" || 
+                        type == "CHAT_HISTORY"||
+                        type == "JOIN" ||
                         type == "DRAW" ||
                         type == "ERASE" ||
                         type == "SHAPE" ||
                         type == "TEXT" ||
                         type == "CLEAR" ||
-                        type == "CHAT"
+                        type == "CHAT" ||
+                        type == "LEAVE"
                     )
                     {
                         OnMessageReceived?.Invoke(msg);
