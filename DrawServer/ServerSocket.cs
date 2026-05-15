@@ -15,7 +15,7 @@ namespace DrawServer
     public class ServerSocket
     {
         private string connectionString =
-            "server=localhost;database=online_Drawing_DB;user=root;password=";
+            "server=localhost;database=online_Drawing_DB;user=root;password=182806";
 
         private TcpListener server;
 
@@ -23,9 +23,9 @@ namespace DrawServer
         private ConcurrentDictionary<string, ConcurrentDictionary<TcpClient, byte>> rooms
             = new ConcurrentDictionary<string, ConcurrentDictionary<TcpClient, byte>>();
 
-        // Quản lý thông tin User trên mỗi Connection để biết ai vừa thoát
-        private ConcurrentDictionary<TcpClient, (int UserId, string RoomId)> clientMetadata
-            = new ConcurrentDictionary<TcpClient, (int UserId, string RoomId)>();
+        // Quản lý thông tin User trên mỗi Connection (UserId, RoomId, Username)
+        private ConcurrentDictionary<TcpClient, (int UserId, string RoomId, string Username)> clientMetadata
+            = new ConcurrentDictionary<TcpClient, (int UserId, string RoomId, string Username)>();
 
         private static readonly HttpClient _httpClient = new HttpClient();
         private const string MasterApiUrl = "http://localhost:5274/api/room/update-status";
@@ -98,15 +98,42 @@ namespace DrawServer
                 }
                 finally
                 {
+                    string targetRoomId = null;
+                    int targetUserId = 0;
+                    string targetUsername = null;
+
+                    // 1. Lấy thông tin user và room từ metadata trước khi xóa
                     if (clientMetadata.TryRemove(client, out var metadata))
                     {
-                        _ = NotifyMasterStatusChanged(metadata.UserId, int.Parse(metadata.RoomId), false);
+                        targetRoomId = metadata.RoomId;
+                        targetUserId = metadata.UserId;
+                        targetUsername = metadata.Username;
+
+                        // Cập nhật DB qua Master API (Code cũ của bạn)
+                        _ = NotifyMasterStatusChanged(targetUserId, int.Parse(targetRoomId), false);
                     }
 
+                    // 2. Xóa client khỏi danh sách phòng của Server trước 
+                    // (Để khi broadcast, Server không gửi ngược lại chính socket đã chết này)
                     RemoveClientFromAllRooms(client);
                     client.Close();
 
-                    Console.WriteLine("Client disconnected + cleaned up");
+                    // 3. Phát tín hiệu LEAVE cho những người còn lại trong phòng
+                    if (targetRoomId != null)
+                    {
+                        var leaveMsg = new DrawMessage
+                        {
+                            type = "LEAVE",
+                            roomId = targetRoomId,
+                            userId = targetUserId,
+                            username = targetUsername // Frontend có thể dựa vào userId để xóa cursor/hiển thị thông báo
+                        };
+
+                        string leaveJson = JsonSerializer.Serialize(leaveMsg);
+                        BroadcastToRoom(targetRoomId, leaveJson, client);
+                    }
+
+                    Console.WriteLine($"[NODE SERVER] Client {targetUserId} disconnected + cleaned up room {targetRoomId}");
                 }
             }
         }
@@ -128,17 +155,37 @@ namespace DrawServer
                 {
                     // Phân loại phòng: Lấy danh sách client của phòng này, hoặc tạo mới nếu phòng chưa tồn tại
                     var room = rooms.GetOrAdd(msg.roomId, _ => new ConcurrentDictionary<TcpClient, byte>());
-                    room[client] = 0; // Thêm client vào phòng
+                    // Gửi thông tin của những người ĐANG Ở SẴN trong phòng cho thành viên MỚI VÀO
+                    foreach (var existingClient in room.Keys)
+                    {
+                        if (clientMetadata.TryGetValue(existingClient, out var meta))
+                        {
+                            var existingUserMsg = new DrawMessage
+                            {
+                                type = "JOIN",
+                                roomId = msg.roomId,
+                                userId = meta.UserId,
+                                username = meta.Username
+                            };
+                            string existingJson = JsonSerializer.Serialize(existingUserMsg) + "\n";
+                            byte[] existingData = Encoding.UTF8.GetBytes(existingJson);
+                            try { client.GetStream().Write(existingData, 0, existingData.Length); } catch { }
+                        }
+                    }
 
+                    room[client] = 0; // Thêm client vào phòng
                     // Lưu lại Metadata để xử lý khi thoát
                     // Lưu ý: Client cần gửi kèm userId trong gói tin JOIN
-                    clientMetadata[client] = (msg.userId, msg.roomId);
+                    clientMetadata[client] = (msg.userId, msg.roomId, msg.username);
 
                     // Cập nhật Online trong DB
                     _ = NotifyMasterStatusChanged(msg.userId, int.Parse(msg.roomId), true);
 
                     Console.WriteLine($"Client {msg.userId} vào phòng: {msg.roomId}");
-
+                    // Phát lệnh JOIN của thành viên mới này cho TẤT CẢ mọi người trong phòng biết để cập nhật UI
+                    string joinJson = JsonSerializer.Serialize(msg);
+                    BroadcastToRoom(msg.roomId, joinJson, client);
+                    // Gửi lịch sử dữ liệu
                     SendHistoryToClient(client, msg.roomId);
                     SendChatHistoryToClient(client, msg.roomId);
                 }
@@ -182,6 +229,11 @@ namespace DrawServer
                         _ = NotifyMasterStatusChanged(metadata.UserId, int.Parse(metadata.RoomId), false);
                     }
                     RemoveClientFromRoom(msg.roomId, client);
+                    // Gửi thông tin LEAVE này cho tất cả những người còn lại trong phòng
+                    string leaveJson = JsonSerializer.Serialize(msg);
+                    BroadcastToRoom(msg.roomId, leaveJson, client);
+
+                    Console.WriteLine($"Client {msg.userId} chủ động rời phòng: {msg.roomId}");
                 }
             }
             catch (Exception ex) { Console.WriteLine("Lỗi xử lý JSON: " + ex.Message); }

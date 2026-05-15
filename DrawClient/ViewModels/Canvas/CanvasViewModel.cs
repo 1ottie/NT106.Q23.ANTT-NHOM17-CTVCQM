@@ -569,6 +569,30 @@ namespace DrawClient.ViewModels
         {
             switch (draw.type)
             {
+                case "JOIN":
+                    InvokeUI(() =>
+                    {
+                        // Nếu gói tin JOIN này là của chính mình thì bỏ qua (vì constructor đã tự add mình rồi)
+                        if (draw.userId == ClientSocket.Instance.CurrentUserId)
+                            return;
+
+                        string joinedUsername = string.IsNullOrEmpty(draw.username) ? $"User {draw.userId}" : draw.username;
+                        string initials = GetInitials(joinedUsername);
+
+                        // Kiểm tra trùng lặp trước khi thêm vào danh sách Sidebar bên phải
+                        if (!Users.Any(u => u.Initials == initials))
+                        {
+                            Users.Add(new UserParticipant
+                            {
+                                Initials = initials,
+                                ColorHex = "#4CAF50" // Đặt màu đại diện cho người khác
+                            });
+
+                            // Thêm một dòng thông báo hệ thống lên góc màn hình vẽ
+                            NetworkLogs.Add($"[MẠNG] {joinedUsername} đã vào phòng.");
+                        }
+                    });
+                    break;
                 case "DRAW":
                     InvokeUI(() =>
                         OnLineReceived?.Invoke(
@@ -600,6 +624,21 @@ namespace DrawClient.ViewModels
                     break;
 
                 case "LEAVE":
+                    InvokeUI(() =>
+                    {
+                        string leftUsername = string.IsNullOrEmpty(draw.username) ? $"User {draw.userId}" : draw.username;
+
+                        // Ghi nhận log mạng hiển thị lên góc màn hình phòng vẽ
+                        NetworkLogs.Add($"[MẠNG] {leftUsername} đã rời phòng.");
+
+                        // Tự động xóa user này ra khỏi danh sách Online Users hiển thị ở Sidebar bên phải
+                        string targetInitials = GetInitials(leftUsername);
+                        var userToRemove = Users.FirstOrDefault(u => u.Initials == targetInitials);
+                        if (userToRemove != null)
+                        {
+                            Users.Remove(userToRemove);
+                        }
+                    });
                     break;
 
                 case "CHAT":
@@ -765,6 +804,9 @@ namespace DrawClient.ViewModels
             };
 
             ClientSocket.Instance.Send(leaveMsg);
+
+            Cleanup();
+            ClientSocket.Instance.Disconnect();
 
             GoBackToLobby?.Invoke();
         }

@@ -12,6 +12,7 @@ namespace DrawClient.Models
         public string ActionType { get; set; } // "DRAW", "ERASE", "SHAPE", "TEXT", "CLEAR"
         public Point StartPoint { get; set; }
         public Point EndPoint { get; set; }
+        public string penType { get; set; }
         public string Color { get; set; }
         public double Thickness { get; set; }
         public string ShapeType { get; set; } // "rectangle", "circle", etc.

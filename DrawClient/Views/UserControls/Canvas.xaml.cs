@@ -1,18 +1,20 @@
-﻿using DrawClient.ViewModels;
+﻿using DrawClient.Models;
+using DrawClient.Services;
+using DrawClient.ViewModels;
 using System;
 using System.Collections.Generic;
 using System.ComponentModel;
+using System.IO;
+using System.Linq;
 using System.Net.NetworkInformation;
 using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Ink;
 using System.Windows.Input;
 using System.Windows.Media;
-using DrawClient.Models;
-using System.Linq;
-using System.IO;
+using System.Windows.Media.Animation;
 using System.Windows.Media.Imaging;
-using DrawClient.Services;
+using System.Windows.Threading;
 
 namespace DrawClient.Views.UserControls
 {
@@ -26,6 +28,7 @@ namespace DrawClient.Views.UserControls
         private bool isShapeDrawing = false;
         private System.Windows.Shapes.Rectangle _ocrSelectionRect;
         private Point _ocrStartPoint;
+        private DispatcherTimer _laserTimer;
 
         public Canvas()
         {
@@ -34,6 +37,17 @@ namespace DrawClient.Views.UserControls
             this.DataContextChanged += Canvas_DataContextChanged;
 
             this.PreviewMouseDown += UserControl_PreviewMouseDown;
+            //laser
+            this.inkCanvas.MouseMove += InkCanvas_MouseMove;
+            _laserTimer = new DispatcherTimer();
+            _laserTimer.Interval = TimeSpan.FromSeconds(3);
+
+            _laserTimer.Tick += (s, e) =>
+            {
+                _laserTimer.Stop();
+                FadeOutLaser();
+            };
+
 
             // FIX MEMORY LEAK
             this.Unloaded += Canvas_Unloaded;
@@ -66,12 +80,12 @@ namespace DrawClient.Views.UserControls
         private void ChatMessages_CollectionChanged(
             object sender,
             System.Collections.Specialized.NotifyCollectionChangedEventArgs e)
-                {
-                    Application.Current.Dispatcher.BeginInvoke(new Action(() =>
-                    {
-                        ChatScrollViewer?.ScrollToEnd();
-                    }));
-                }
+        {
+            Application.Current.Dispatcher.BeginInvoke(new Action(() =>
+            {
+                ChatScrollViewer?.ScrollToEnd();
+            }));
+        }
 
         private void Canvas_DataContextChanged(object sender, DependencyPropertyChangedEventArgs e)
         {
@@ -111,11 +125,11 @@ namespace DrawClient.Views.UserControls
                 }
 
                 UpdateCurrentDrawingAttributes(_viewModel);
-                 _viewModel.OnUndoRedo += RedrawAllFromActions;
+                _viewModel.OnUndoRedo += RedrawAllFromActions;
             }
         }
 
-                    private void RedrawAllFromActions()
+        private void RedrawAllFromActions()
         {
             Application.Current.Dispatcher.Invoke(() =>
             {
@@ -154,7 +168,7 @@ namespace DrawClient.Views.UserControls
                         MyCanvas.Strokes.Add(stroke);
                     }
                     break;
-                // ERASE không cần xử lý vì nét đó đã bị xóa khỏi danh sách action
+                    // ERASE không cần xử lý vì nét đó đã bị xóa khỏi danh sách action
             }
         }
 
@@ -191,6 +205,11 @@ namespace DrawClient.Views.UserControls
                                        e.PropertyName == "IsEraserSelected" ||
                                        e.PropertyName == "IsPencilSelected"))
             {
+                if (_viewModel != null)
+                {
+                    // Chạy trên luồng UI để cập nhật giao diện nét vẽ
+                    Dispatcher.Invoke(() => UpdateCurrentDrawingAttributes(_viewModel));
+                }
                 UpdateCurrentDrawingAttributes(_viewModel);
             }
         }
@@ -204,6 +223,7 @@ namespace DrawClient.Views.UserControls
         }
 
         // Cập nhật trực tiếp lên Canvas thực tế
+
         private void UpdateCurrentDrawingAttributes(CanvasViewModel vm)
         {
             if (vm?.Toolbar == null) return;
@@ -214,7 +234,7 @@ namespace DrawClient.Views.UserControls
             bool isEraser = vm.Toolbar.IsEraserSelected || selectedTool == "eraser";
             try
             {
-                var color = (Color)ColorConverter.ConvertFromString(_viewModel.Toolbar.CurrentColor);
+                var color = (Color)ColorConverter.ConvertFromString(vm.Toolbar.CurrentColor);
                 var attributes = new DrawingAttributes
                 {
                     Color = color,
@@ -231,29 +251,18 @@ namespace DrawClient.Views.UserControls
                 {
                     case "Fountain":
                         attributes.StylusTip = StylusTip.Rectangle;
-                        attributes.Width = size * 0.4;
-                        attributes.Height = size * 1.5;
+                        attributes.Width = size * 0.8;
+                        attributes.Height = size * 1.8;
                         break;
                     case "Highlighter":
                         attributes.IsHighlighter = true;
                         attributes.Height = size * 1.5;
                         attributes.Width = size * 1.5;
                         attributes.StylusTip = StylusTip.Rectangle;
-                        attributes.Color = System.Windows.Media.Color.FromArgb(120, color.R, color.G, color.B);
+                        // FitToCurve false để tránh lớp chồng
+                        attributes.FitToCurve = false;
                         break;
                     case "Laser":
-                        attributes.Color = System.Windows.Media.Color.FromArgb(150, 255, 0, 0);
-                        attributes.Width = size;
-                        break;
-                    case "Brush":
-                        attributes.StylusTip = StylusTip.Ellipse;
-                        attributes.Width = size;
-                        attributes.Height = size;
-                        attributes.IsHighlighter = false;
-                        break;
-                    default:
-                        attributes.Width = size;
-                        attributes.Height = size;
                         break;
                 }
 
@@ -270,18 +279,25 @@ namespace DrawClient.Views.UserControls
                 {
                     MyCanvas.EditingMode = InkCanvasEditingMode.EraseByPoint;
                 }
-                else if (_viewModel.SelectedTool?.ToLower() == "shape")
+                else if (selectedTool == "shape")
                 {
                     MyCanvas.EditingMode = InkCanvasEditingMode.None;
                     return;
                 }
-                else if (_viewModel.SelectedTool?.ToLower() == "select")
+                else if (selectedTool == "select")
                 {
                     MyCanvas.EditingMode = InkCanvasEditingMode.Select;
                 }
                 else
                 {
-                    MyCanvas.EditingMode = InkCanvasEditingMode.Ink;
+                    if (vm.Toolbar.CurrentPenType == "Laser")
+                    {
+                        MyCanvas.EditingMode = InkCanvasEditingMode.None;
+                    }
+                    else
+                    {
+                        MyCanvas.EditingMode = InkCanvasEditingMode.Ink;
+                    }
                 }
             }
             catch (Exception ex)
@@ -648,7 +664,7 @@ namespace DrawClient.Views.UserControls
                             _viewModel.SendText(detectedText, new Point(x, y));
 
                             // Xóa các nét chữ viết tay cũ bên dưới vùng chọn
-                            MyCanvas.Strokes.Erase(new Rect(x, y, width, height)); 
+                            MyCanvas.Strokes.Erase(new Rect(x, y, width, height));
                         }
                         else
                         {
@@ -663,6 +679,48 @@ namespace DrawClient.Views.UserControls
                 }
                 return;
             }
+        }
+
+        private void InkCanvas_MouseMove(object sender, MouseEventArgs e)
+        {
+            if (_viewModel?.Toolbar?.CurrentPenType != "Laser")
+                return;
+
+            if (e.LeftButton != MouseButtonState.Pressed)
+                return;
+
+            Point p = e.GetPosition(laserCanvas);
+
+            ShowLaser(p);
+        }
+        private void ShowLaser(Point p)
+        {
+            laserDot.Visibility = Visibility.Visible;
+            laserDot.Opacity = 1;
+
+            System.Windows.Controls.Canvas.SetLeft(laserDot, p.X - laserDot.Width / 2);
+
+            System.Windows.Controls.Canvas.SetTop(laserDot, p.Y - laserDot.Height / 2);
+
+            // reset timer
+            _laserTimer.Stop();
+            _laserTimer.Start();
+        }
+        private void FadeOutLaser()
+        {
+            DoubleAnimation fade = new DoubleAnimation
+            {
+                From = 1,
+                To = 0,
+                Duration = TimeSpan.FromMilliseconds(500)
+            };
+
+            fade.Completed += (s, e) =>
+            {
+                laserDot.Visibility = Visibility.Collapsed;
+            };
+
+            laserDot.BeginAnimation(UIElement.OpacityProperty, fade);
         }
 
         private void UpdateEraserCursor(Point p)
@@ -744,9 +802,23 @@ namespace DrawClient.Views.UserControls
                 try
                 {
                     Color color;
+                    //cục tẩy
+                    if (colorHex == "#ERASE")
+                    {
+                        // Tạo hình dáng cục tẩy
+                        var eraserShape = new System.Windows.Ink.EllipseStylusShape(thickness, thickness);
 
-                    // 🔥 FIX CASE ERASER
-                    if (string.IsNullOrWhiteSpace(colorHex) || colorHex == "#ERASE")
+                        // Khởi tạo quỹ đạo đi qua của cục tẩy
+                        Point[] erasePath = new Point[] { start, end };
+
+                        // Gọi hàm Erase để cắt bay các nét vẽ cũ
+                        MyCanvas.Strokes.Erase(erasePath, eraserShape);
+
+                        return; // Dừng hàm lại luôn, KHÔNG chạy xuống phần thêm nét (Add stroke) ở dưới nữa
+                    }
+
+                    // nét vẽ thường
+                    if (string.IsNullOrWhiteSpace(colorHex))
                     {
                         color = Colors.Transparent;
                     }
@@ -764,10 +836,10 @@ namespace DrawClient.Views.UserControls
                     };
 
                     var points = new StylusPointCollection
-            {
-                new StylusPoint(start.X, start.Y),
-                new StylusPoint(end.X, end.Y)
-            };
+                    {
+                        new StylusPoint(start.X, start.Y),
+                        new StylusPoint(end.X, end.Y)
+                    };
 
                     var stroke = new Stroke(points, attributes);
 
@@ -787,10 +859,10 @@ namespace DrawClient.Views.UserControls
                     };
 
                     var points = new StylusPointCollection
-            {
-                new StylusPoint(start.X, start.Y),
-                new StylusPoint(end.X, end.Y)
-            };
+                    {
+                        new StylusPoint(start.X, start.Y),
+                        new StylusPoint(end.X, end.Y)
+                    };
 
                     MyCanvas.Strokes.Add(new Stroke(points, attributes));
                 }
@@ -943,18 +1015,18 @@ namespace DrawClient.Views.UserControls
         private void txtChatInput_KeyDown(
             object sender,
             KeyEventArgs e)
+        {
+            if (e.Key == Key.Enter)
+            {
+                if (DataContext is CanvasViewModel vm)
                 {
-                    if (e.Key == Key.Enter)
-                    {
-                        if (DataContext is CanvasViewModel vm)
-                        {
-                            vm.SendChatMessageCommand.Execute(null);
-                        }
-
-                        e.Handled = true;
-                    }
+                    vm.SendChatMessageCommand.Execute(null);
                 }
+
+                e.Handled = true;
+            }
         }
-        
-        
     }
+
+
+}

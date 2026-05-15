@@ -619,6 +619,25 @@
 
             <Grid Grid.Column="0" ClipToBounds="True">
 
+                <Grid>
+
+                    <!-- Canvas vẽ -->
+                    <InkCanvas x:Name="inkCanvas"/>
+
+                    <!-- Laser pointer -->
+                    <Canvas x:Name="laserCanvas"
+            IsHitTestVisible="False">
+
+                        <Ellipse x:Name="laserDot"
+                 Width="24"
+                 Height="24"
+                 Fill="Red"
+                 Opacity="0"
+                 Visibility="Collapsed"/>
+                    </Canvas>
+
+                </Grid>
+
                 <InkCanvas x:Name="MyCanvas"
                            Grid.Column="0"
                            EditingMode="{Binding CurrentEditingMode}" 
