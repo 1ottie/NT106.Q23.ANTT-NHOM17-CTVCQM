@@ -64,7 +64,7 @@ namespace DrawClient.ViewModels
 
         // TODO:
         // đổi localhost thành IP server thật nếu chạy nhiều máy
-        private const string BaseUrl = "http://localhost:5274/api/room";
+        private const string BaseUrl = "http://192.168.1.44:5274/api/room";
 
         private string _newRoomName = "My Awesome Room";
 

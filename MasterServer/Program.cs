@@ -4,16 +4,15 @@ using Microsoft.Extensions.Hosting;
 using Microsoft.AspNetCore.Authentication.JwtBearer;
 using Microsoft.IdentityModel.Tokens;
 using System.Text;
-using System.Threading;
-using System.Threading.Tasks;
 
 var builder = WebApplication.CreateBuilder(args);
+
 Console.OutputEncoding = System.Text.Encoding.UTF8;
 
-// 1. Lấy cấu hình
+// JWT
 var jwtKey = builder.Configuration["Jwt:Secret"] ?? "YourSuperSecretKeyHere1234567890";
 
-// 2. Đăng ký các Controllers và Services hiện có
+// SERVICES
 builder.Services.AddControllers();
 
 builder.Services.AddAuthentication(JwtBearerDefaults.AuthenticationScheme)
@@ -25,25 +24,41 @@ builder.Services.AddAuthentication(JwtBearerDefaults.AuthenticationScheme)
             ValidateAudience = false,
             ValidateLifetime = true,
             ValidateIssuerSigningKey = true,
-            IssuerSigningKey = new SymmetricSecurityKey(Encoding.UTF8.GetBytes(jwtKey))
+            IssuerSigningKey =
+                new SymmetricSecurityKey(
+                    Encoding.UTF8.GetBytes(jwtKey))
         };
     });
 
 builder.Services.AddAuthorization();
 
-// Các Service logic của bạn
+builder.Services.AddEndpointsApiExplorer();
+builder.Services.AddSwaggerGen();
+
+// SERVICES CUSTOM
 builder.Services.AddScoped<JwtHelper>();
 builder.Services.AddScoped<AuthService>();
 builder.Services.AddScoped<NodeService>();
 builder.Services.AddScoped<DbConnection>();
 builder.Services.AddScoped<RoomService>();
 
+// KESTREL LAN
+builder.WebHost.ConfigureKestrel(options =>
+{
+    options.ListenAnyIP(5274);
+});
+
 var app = builder.Build();
 
-// 4. Cấu hình Middleware
+// SWAGGER
+app.UseSwagger();
+app.UseSwaggerUI();
+
+// AUTH
 app.UseAuthentication();
 app.UseAuthorization();
 
+// CONTROLLERS
 app.MapControllers();
 
 app.Run();

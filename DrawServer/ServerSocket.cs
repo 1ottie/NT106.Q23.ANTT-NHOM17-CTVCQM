@@ -33,7 +33,7 @@ namespace DrawServer
         
         private bool _isRunning = true;
         private static readonly HttpClient _httpClient = new HttpClient();
-        private const string MasterApiUrl = "http://localhost:5274/api/room/update-status";
+        private const string MasterApiUrl = "http://192.168.1.44:5274/api/room/update-status";
 
         public void Start(int port)
         {
@@ -379,7 +379,7 @@ namespace DrawServer
 
                 var registerPayload = new
                 {
-                    ip_address = "127.0.0.1", // Nếu chạy khác máy, hãy đổi thành IP LAN/WAN của máy này
+                    ip_address = "192.168.1.44", // Nếu chạy khác máy, hãy đổi thành IP LAN/WAN của máy này
                     port = _currentNodePort
                 };
 
@@ -387,7 +387,7 @@ namespace DrawServer
                 var content = new StringContent(jsonString, Encoding.UTF8, "application/json");
 
                 // Gửi POST Request lên API của Master Server (Cổng 5274)
-                var response = await _httpClient.PostAsync("http://localhost:5274/api/node/register", content);
+                var response = await _httpClient.PostAsync("http://192.168.1.44:5274/api/node/register", content);
 
                 if (response.IsSuccessStatusCode)
                 {
@@ -411,7 +411,7 @@ namespace DrawServer
             catch (Exception ex)
             {
                 Console.ForegroundColor = ConsoleColor.Red;
-                Console.WriteLine($"[NODE SERVER] LỖI MẠNG: Không thể kết nối tới Master Server tại địa chỉ http://localhost:5274");
+                Console.WriteLine($"[NODE SERVER] LỖI MẠNG: Không thể kết nối tới Master Server tại địa chỉ http://192.168.1.44:5274");
                 Console.WriteLine($"[NODE SERVER] Chi tiết lỗi: {ex.Message}");
                 Console.ResetColor();
             }
