@@ -20,6 +20,8 @@ namespace DrawServer
         public double y2 { get; set; }
         public string color { get; set; }
         public double thickness { get; set; }
+        public string penType { get; set; }
+        public bool isHighlighter { get; set; }
         public string shapeType { get; set; }
 
         public string text { get; set; }
@@ -31,6 +33,7 @@ namespace DrawServer
         public string content { get; set; }
         public DateTime timestamp { get; set; }
         public string actionToUndoId { get; set; } // ID của action bị undo
+        public string actionId { get; set; } // ID of specific action for UNDO/REDO sync
         public int undoCount { get; set; } // Số lần undo
         public List<DrawMessage> actions { get; set; }
     }

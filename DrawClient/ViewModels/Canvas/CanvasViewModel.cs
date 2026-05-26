@@ -1,22 +1,29 @@
 ﻿using DrawClient.Models;
-using DrawClient.ViewModels.Canvas;
 using DrawClient.Services;
+using DrawClient.ViewModels.Canvas;
 using System;
+using System.Collections.Generic;
 using System.Collections.ObjectModel;
 using System.ComponentModel;
+using System.Drawing.Drawing2D;
 using System.Linq;
 using System.Runtime.CompilerServices;
+using System.Runtime.InteropServices;
 using System.Text.Json;
+using System.Threading;
+using System.Threading.Tasks;
 using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Ink;
 using System.Windows.Input;
-using System.Threading.Tasks;
+using System.Windows.Media;
 
 namespace DrawClient.ViewModels
 {
     public class UserParticipant
     {
+        public int UserId { get; set; }
+        public string Username { get; set; }
         public string Initials { get; set; } = "";
         public string ColorHex { get; set; } = "";
     }
@@ -25,15 +32,32 @@ namespace DrawClient.ViewModels
     {
         public ToolbarViewModel Toolbar { get; set; } = new ToolbarViewModel();
 
-        public Action<Point, Point, string, double> OnLineReceived;
+        public Action<Point, Point, string, double, string, bool> OnLineReceived;
+        public Action<string> OnSelectionTransformedReceived; // Thêm dòng này để View lắng nghe
+        public Action<Point, Point, double> OnEraseReceived;
+        public Action<Point, string, double, string, int> OnLaserReceived;
         public Action<DrawMessage> OnShapeReceived;
         public Action<DrawMessage> OnTextReceived;
         public Action<DrawMessage> OnDeleteTextReceived;
         public Action OnCanvasCleared;
         public Action GoBackToLobby;
         public UndoRedoManager UndoRedoManager { get; private set; } = new UndoRedoManager();
-        public event Action OnUndoRedo; 
+        public event Action OnUndoRedo;
         private bool _isCleanedUp = false;
+        private bool _isApplyingRemoteUndoRedo = false;
+
+        // Replay/Play events - View subscribes to render each step
+        public event Action<DrawMessage> OnReplayDraw;
+        public event Action<DrawMessage> OnReplayErase;
+        public event Action<DrawMessage> OnReplayShape;
+        public event Action<DrawMessage> OnReplayText;
+        public event Action<string> OnReplayUndo;   // actionId to undo
+        public event Action<string> OnReplayRedo;   // actionId to redo
+        public event Action OnReplayClear;
+        public event Action OnReplayFinished;
+
+        private List<DrawMessage> _rawHistory = new List<DrawMessage>();
+        private CancellationTokenSource _playCts;
 
 
         #region Properties
@@ -45,6 +69,7 @@ namespace DrawClient.ViewModels
 
         private string _roomPassword;
         public string RoomPassword { get => _roomPassword; set { _roomPassword = value; OnPropertyChanged(); } }
+
 
         private bool _isColorMenuOpen;
         public bool IsColorMenuOpen { get => _isColorMenuOpen; set { _isColorMenuOpen = value; OnPropertyChanged(); } }
@@ -114,7 +139,7 @@ namespace DrawClient.ViewModels
         }
 
         private string _previousColor = "#000000";
-        
+
         private bool _isOcrToastVisible = false;
 
         public bool IsOcrToastVisible
@@ -124,25 +149,46 @@ namespace DrawClient.ViewModels
         }
 
         private bool _canUndo = false;
-                public bool CanUndo
-                {
-                    get => _canUndo;
-                    set { _canUndo = value; OnPropertyChanged(); }
-                }
+        public bool CanUndo
+        {
+            get => _canUndo;
+            set { _canUndo = value; OnPropertyChanged(); }
+        }
 
-                private bool _canRedo = false;
-                public bool CanRedo
-                {
-                    get => _canRedo;
-                    set { _canRedo = value; OnPropertyChanged(); }
-                }
+        private bool _canRedo = false;
+        public bool CanRedo
+        {
+            get => _canRedo;
+            set { _canRedo = value; OnPropertyChanged(); }
+        }
 
-                private string _historyInfo = "History: 0 Undo | 0 Redo";
-                public string HistoryInfo
-                {
-                    get => _historyInfo;
-                    set { _historyInfo = value; OnPropertyChanged(); }
-                }
+        private string _historyInfo = "History: 0 Undo | 0 Redo";
+        public string HistoryInfo
+        {
+            get => _historyInfo;
+            set { _historyInfo = value; OnPropertyChanged(); }
+        }
+
+        private bool _isPlaying = false;
+        public bool IsPlaying
+        {
+            get => _isPlaying;
+            set { _isPlaying = value; OnPropertyChanged(); }
+        }
+
+        private double _playProgress = 0;
+        public double PlayProgress
+        {
+            get => _playProgress;
+            set { _playProgress = value; OnPropertyChanged(); }
+        }
+
+        private string _playProgressText = "0%";
+        public string PlayProgressText
+        {
+            get => _playProgressText;
+            set { _playProgressText = value; OnPropertyChanged(); }
+        }
 
         #endregion
 
@@ -165,7 +211,8 @@ namespace DrawClient.ViewModels
         public ICommand UndoCommand { get; }
         public ICommand RedoCommand { get; }
         public ICommand ClearHistoryCommand { get; }
-        
+        public ICommand PlayCommand { get; }
+
         public ICommand SendChatMessageCommand { get; }
 
         #endregion
@@ -235,14 +282,12 @@ namespace DrawClient.ViewModels
 
             ClearCanvasCommand = new RelayCommand(ExecuteClearCanvas);
             // Undo/Redo
-            UndoRedoManager.OnUndo += HandleUndo;  
-            UndoRedoManager.OnRedo += HandleRedo;  
-            UndoRedoManager.OnHistoryChanged += UpdateHistoryUI;
             UpdateHistoryUI();
 
             UndoCommand = new RelayCommand(_ => ExecuteUndo(), _ => CanUndo);
             RedoCommand = new RelayCommand(_ => ExecuteRedo(), _ => CanRedo);
             ClearHistoryCommand = new RelayCommand(_ => ExecuteClearHistory());
+            PlayCommand = new RelayCommand(_ => TogglePlay());
 
             string safeUsername =
                 LoginViewModel.CurrentUsername
@@ -255,6 +300,8 @@ namespace DrawClient.ViewModels
             {
                 new UserParticipant
                 {
+                    UserId = ClientSocket.Instance.CurrentUserId,
+                    Username = safeUsername,
                     Initials = CurrentUserInitials,
                     ColorHex = "#1A73E8"
                 }
@@ -293,7 +340,7 @@ namespace DrawClient.ViewModels
                     Toolbar.CurrentColor = hex;
 
                     SelectedTool = "pen";
-                    Toolbar.IsPencilSelected = true;  
+                    Toolbar.IsPencilSelected = true;
                     Toolbar.IsEraserSelected = false;
                     CurrentEditingMode = InkCanvasEditingMode.Ink;
                 }
@@ -311,6 +358,13 @@ namespace DrawClient.ViewModels
                     {
                         CurrentShape = type;
                         SelectedTool = "shape";
+                        CurrentEditingMode = InkCanvasEditingMode.None;
+                    }
+                    else if (string.Equals(type, "laser", StringComparison.OrdinalIgnoreCase))
+                    {
+                        SelectedTool = "pen";
+                        Toolbar.IsPencilSelected = false;
+                        Toolbar.IsEraserSelected = false;
                         CurrentEditingMode = InkCanvasEditingMode.None;
                     }
                     else
@@ -369,7 +423,7 @@ namespace DrawClient.ViewModels
 
                 return;
             }
-            
+
 
             if (SelectedTool == tool)
             {
@@ -384,7 +438,7 @@ namespace DrawClient.ViewModels
                 {
                     ShowOcrToastTemporarily();
                 }
-                return; 
+                return;
             }
 
             SelectedTool = tool;
@@ -394,7 +448,7 @@ namespace DrawClient.ViewModels
             if (tool.ToLowerInvariant() != "ocr")
             {
                 IsOcrToastVisible = false;
-                _ocrToastToken++; 
+                _ocrToastToken++;
             }
 
             switch (tool)
@@ -405,8 +459,16 @@ namespace DrawClient.ViewModels
 
                 case "pencil":
                 case "pen":
-                    CurrentEditingMode = InkCanvasEditingMode.Ink;
-                    Toolbar.IsPencilSelected = true;   
+                    if (string.Equals(Toolbar.CurrentPenType, "laser", StringComparison.OrdinalIgnoreCase))
+                    {
+                        CurrentEditingMode = InkCanvasEditingMode.None;
+                        Toolbar.IsPencilSelected = false;
+                    }
+                    else
+                    {
+                        CurrentEditingMode = InkCanvasEditingMode.Ink;
+                        Toolbar.IsPencilSelected = true;
+                    }
                     Toolbar.IsEraserSelected = false;
                     Toolbar.IsShapeSelected = false;
                     Toolbar.IsTextSelected = false;
@@ -420,7 +482,7 @@ namespace DrawClient.ViewModels
 
                 case "eraser":
                     CurrentEditingMode = InkCanvasEditingMode.EraseByPoint;
-                    Toolbar.IsEraserSelected = true;   
+                    Toolbar.IsEraserSelected = true;
                     Toolbar.IsPencilSelected = false;
                     Toolbar.IsShapeSelected = false;
                     Toolbar.IsTextSelected = false;
@@ -513,52 +575,90 @@ namespace DrawClient.ViewModels
                         return;
 
                     string type = typeEl.GetString();
+                    if (string.IsNullOrEmpty(type)) return;
 
-                    if (string.IsNullOrEmpty(type))
-                        return;
-
-                    // ================= HISTORY =================
+                    // HISTORY
                     if (type == "HISTORY")
                     {
                         if (!doc.RootElement.TryGetProperty("actions", out var actions))
                             return;
 
+                        // Store raw history for Play feature
+                        _rawHistory.Clear();
                         foreach (var item in actions.EnumerateArray())
                         {
-                            var draw = JsonSerializer.Deserialize<DrawMessage>(
-                                item.GetRawText(),
-                                _jsonOptions);
+                            var h = JsonSerializer.Deserialize<DrawMessage>(item.GetRawText(), _jsonOptions);
+                            if (h != null) _rawHistory.Add(h);
+                        }
 
-                            if (draw == null)
-                                continue;
+                        // Pass 1: Replay all actions in order to build correct canvas state
+                        foreach (var item in actions.EnumerateArray())
+                        {
+                            var draw = JsonSerializer.Deserialize<DrawMessage>(item.GetRawText(), _jsonOptions);
+                            if (draw == null) continue;
 
-                            DispatchDraw(draw);
-
-                            // Lưu history vào Undo stack
-                            if (draw.type == "DRAW" ||
-                                draw.type == "ERASE" ||
-                                draw.type == "SHAPE" ||
-                                draw.type == "TEXT")
+                            if (draw.type == "DRAW" || draw.type == "ERASE" || draw.type == "SHAPE" || draw.type == "TEXT")
                             {
-                                UndoRedoManager.AddAction(
-                                    new DrawAction(
-                                        draw.type,
-                                        new Point(draw.x1, draw.y1),
-                                        new Point(draw.x2, draw.y2),
-                                        draw.color,
-                                        draw.thickness,
-                                        draw.userId,
-                                        draw.username,
-                                        RoomId
-                                    )
-                                );
+                                // Add to undo manager (creates action with ID)
+                                var action = new DrawAction(
+                                    draw.type,
+                                    new Point(draw.x1, draw.y1),
+                                    new Point(draw.x2, draw.y2),
+                                    draw.color,
+                                    draw.thickness,
+                                    draw.userId,
+                                    draw.username,
+                                    RoomId);
+                                UndoRedoManager.AddAction(action);
+                                // Store the actionId in the draw message for later reference
+                                draw.actionId = action.Id;
+                            }
+                            else if (draw.type == "UNDO")
+                            {
+                                // Find the most recent non-undone action by this user and undo it
+                                UndoRedoManager.Undo(draw.userId);
+                            }
+                            else if (draw.type == "REDO")
+                            {
+                                UndoRedoManager.Redo(draw.userId);
+                            }
+                            else if (draw.type == "CLEAR")
+                            {
+                                UndoRedoManager.Clear();
                             }
                         }
 
+                        // Pass 2: Render only active (non-undone) actions on canvas
+                        InvokeUI(() =>
+                        {
+                            OnCanvasCleared?.Invoke();
+                            var activeActions = UndoRedoManager.GetAllActions();
+                            foreach (var action in activeActions)
+                            {
+                                // Re-dispatch each active action to render on canvas
+                                var redrawMsg = new DrawMessage
+                                {
+                                    type = action.ActionType,
+                                    x1 = action.StartPoint.X,
+                                    y1 = action.StartPoint.Y,
+                                    x2 = action.EndPoint.X,
+                                    y2 = action.EndPoint.Y,
+                                    color = action.Color,
+                                    thickness = action.Thickness,
+                                    penType = action.penType,
+                                    shapeType = action.ShapeType,
+                                    text = action.Text,
+                                    fontSize = action.FontSize
+                                };
+                                DispatchDraw(redrawMsg);
+                            }
+                        });
+
+                        UpdateHistoryUI();
                         return;
                     }
 
-                    // ================= CHAT HISTORY =================
+                    // CHAT_HISTORY
                     if (type == "CHAT_HISTORY")
                     {
                         if (!doc.RootElement.TryGetProperty("messages", out var messages))
@@ -566,159 +666,131 @@ namespace DrawClient.ViewModels
 
                         foreach (var item in messages.EnumerateArray())
                         {
-                            var chat = JsonSerializer.Deserialize<DrawMessage>(
-                                item.GetRawText(),
-                                _jsonOptions);
-
-                            if (chat == null)
-                                continue;
-
+                            var chat = JsonSerializer.Deserialize<DrawMessage>(item.GetRawText(), _jsonOptions);
+                            if (chat == null) continue;
                             DispatchDraw(chat);
                         }
 
                         return;
                     }
 
-                    // ================= NORMAL MESSAGE =================
-                    var drawMsg = JsonSerializer.Deserialize<DrawMessage>(
-                        msg,
-                        _jsonOptions);
+                    //select
+                    if (type == "TRANSFORM_SELECTION")
+                    {
+                        // Kiểm tra xem ID người gửi có phải là chính mình không, nếu phải thì bỏ qua
+                        if (doc.RootElement.TryGetProperty("userId", out var userEl) &&
+                            userEl.GetInt32() == ClientSocket.Instance.CurrentUserId)
+                        {
+                            return;
+                        }
 
-                    if (drawMsg == null)
+                        // Chuyển thẳng chuỗi json thô (biến msg) sang cho View (Canvas.xaml.cs) xử lý giao diện
+                        Application.Current.Dispatcher.Invoke(() =>
+                        {
+                            OnSelectionTransformedReceived?.Invoke(msg); // Thay thế hoàn toàn thành biến 'msg'
+                        });
                         return;
+                    }
+
+                    // NORMAL MESSAGE
+                    var drawMsg = JsonSerializer.Deserialize<DrawMessage>(msg, _jsonOptions);
+                    if (drawMsg == null) return;
 
                     switch (drawMsg.type)
                     {
-                        // ================= DRAW =================
                         case "DRAW":
-
                             DispatchDraw(drawMsg);
-
-                            // Không add duplicate action của chính mình
                             if (drawMsg.userId != ClientSocket.Instance.CurrentUserId)
                             {
-                                UndoRedoManager.AddAction(
-                                    new DrawAction(
-                                        "DRAW",
-                                        new Point(drawMsg.x1, drawMsg.y1),
-                                        new Point(drawMsg.x2, drawMsg.y2),
-                                        drawMsg.color,
-                                        drawMsg.thickness,
-                                        drawMsg.userId,
-                                        drawMsg.username,
-                                        RoomId
-                                    )
-                                );
+                                UndoRedoManager.AddAction(new DrawAction(
+                                    "DRAW",
+                                    new Point(drawMsg.x1, drawMsg.y1),
+                                    new Point(drawMsg.x2, drawMsg.y2),
+                                    drawMsg.color,
+                                    drawMsg.thickness,
+                                    drawMsg.userId,
+                                    drawMsg.username,
+                                    RoomId));
                             }
-
                             break;
 
-                        // ================= ERASE =================
+                        //case "TRANSFORM_SELECTION":
+                        //    Application.Current.Dispatcher.Invoke(() =>
+                        //    {
+                        //        // Kích hoạt sự kiện để View (Canvas.xaml.cs) nghe thấy và xử lý
+                        //        OnSelectionTransformedReceived?.Invoke(msg);
+                        //    });
+                        //    break;
+
                         case "ERASE":
-
                             DispatchDraw(drawMsg);
-
                             if (drawMsg.userId != ClientSocket.Instance.CurrentUserId)
                             {
-                                UndoRedoManager.AddAction(
-                                    new DrawAction(
-                                        "ERASE",
-                                        new Point(drawMsg.x1, drawMsg.y1),
-                                        new Point(drawMsg.x2, drawMsg.y2),
-                                        "#ERASE",
-                                        drawMsg.thickness,
-                                        drawMsg.userId,
-                                        drawMsg.username,
-                                        RoomId
-                                    )
-                                );
+                                UndoRedoManager.AddAction(new DrawAction(
+                                    "ERASE",
+                                    new Point(drawMsg.x1, drawMsg.y1),
+                                    new Point(drawMsg.x2, drawMsg.y2),
+                                    "#ERASE",
+                                    drawMsg.thickness,
+                                    drawMsg.userId,
+                                    drawMsg.username,
+                                    RoomId));
                             }
-
                             break;
 
-                        // ================= SHAPE =================
+                        case "LASER":
+                            InvokeUI(() => OnLaserReceived?.Invoke(new Point(drawMsg.x1, drawMsg.y1), drawMsg.color, drawMsg.thickness, drawMsg.penType?.Trim(), drawMsg.userId));
+                            break;
+
                         case "SHAPE":
-
                             DispatchDraw(drawMsg);
-
                             if (drawMsg.userId != ClientSocket.Instance.CurrentUserId)
                             {
-                                UndoRedoManager.AddAction(
-                                    new DrawAction(
-                                        "SHAPE",
-                                        new Point(drawMsg.x1, drawMsg.y1),
-                                        new Point(drawMsg.x2, drawMsg.y2),
-                                        drawMsg.color,
-                                        drawMsg.thickness,
-                                        drawMsg.userId,
-                                        drawMsg.username,
-                                        RoomId
-                                    )
-                                );
+                                UndoRedoManager.AddAction(new DrawAction(
+                                    "SHAPE",
+                                    new Point(drawMsg.x1, drawMsg.y1),
+                                    new Point(drawMsg.x2, drawMsg.y2),
+                                    drawMsg.color,
+                                    drawMsg.thickness,
+                                    drawMsg.userId,
+                                    drawMsg.username,
+                                    RoomId));
                             }
-
                             break;
 
-                        // ================= TEXT =================
                         case "TEXT":
-
                             DispatchDraw(drawMsg);
-
                             if (drawMsg.userId != ClientSocket.Instance.CurrentUserId)
                             {
-                                UndoRedoManager.AddAction(
-                                    new DrawAction(
-                                        "TEXT",
-                                        new Point(drawMsg.x1, drawMsg.y1),
-                                        new Point(drawMsg.x2, drawMsg.y2),
-                                        drawMsg.color,
-                                        drawMsg.thickness,
-                                        drawMsg.userId,
-                                        drawMsg.username,
-                                        RoomId
-                                    )
-                                );
+                                UndoRedoManager.AddAction(new DrawAction(
+                                    "TEXT",
+                                    new Point(drawMsg.x1, drawMsg.y1),
+                                    new Point(drawMsg.x2, drawMsg.y2),
+                                    drawMsg.color,
+                                    drawMsg.thickness,
+                                    drawMsg.userId,
+                                    drawMsg.username,
+                                    RoomId));
                             }
-
                             break;
 
-                        // ================= UNDO =================
                         case "UNDO":
-
-                            InvokeUI(() =>
-                            {
-                                if (UndoRedoManager.CanUndo())
-                                {
-                                    UndoRedoManager.Undo();
-
-                                    UpdateHistoryUI();
-
-                                    Console.WriteLine(
-                                        $"[NETWORK] Undo from {drawMsg.username}");
-                                }
-                            });
-
+                            if (drawMsg.userId == ClientSocket.Instance.CurrentUserId)
+                                return;
+                            ApplyUndoFromNetwork(drawMsg.actionId, drawMsg.userId);
                             break;
 
-                        // ================= REDO =================
                         case "REDO":
-
-                            InvokeUI(() =>
-                            {
-                                if (UndoRedoManager.CanRedo())
-                                {
-                                    UndoRedoManager.Redo();
-
-                                    UpdateHistoryUI();
-
-                                    Console.WriteLine(
-                                        $"[NETWORK] Redo from {drawMsg.username}");
-                                }
-                            });
-
+                            if (drawMsg.userId == ClientSocket.Instance.CurrentUserId)
+                                return;
+                            ApplyRedoFromNetwork(drawMsg.actionId, drawMsg.userId);
                             break;
 
-                        // ================= OTHERS =================
+                        case "CLEAR":
+                            DispatchDraw(drawMsg);
+                            UndoRedoManager.Clear();
+                            break;
+
                         default:
                             DispatchDraw(drawMsg);
                             break;
@@ -740,26 +812,43 @@ namespace DrawClient.ViewModels
             switch (draw.type)
             {
                 case "JOIN":
+                    // 1. In log thẳng ra màn hình Console của Visual Studio để xác nhận Client đã nhận được lệnh
+                    Console.WriteLine($"[MẠNG - NHẬN LỆNH] '{draw.username}' (ID: {draw.userId}) vừa vào phòng.");
+
                     InvokeUI(() =>
                     {
-                        // Nếu gói tin JOIN này là của chính mình thì bỏ qua (vì constructor đã tự add mình rồi)
+                        // Nếu gói tin là của chính bản thân mình -> Bỏ qua
                         if (draw.userId == ClientSocket.Instance.CurrentUserId)
+                        {
+                            Console.WriteLine("-> Đây là ID của bản thân, bỏ qua.");
                             return;
+                        }
 
                         string joinedUsername = string.IsNullOrEmpty(draw.username) ? $"User {draw.userId}" : draw.username;
                         string initials = GetInitials(joinedUsername);
 
-                        // Kiểm tra trùng lặp trước khi thêm vào danh sách Sidebar bên phải
-                        if (!Users.Any(u => u.Initials == initials))
+                        // Kiểm tra xem user này đã có trong danh sách bên Sidebar chưa
+                        if (!Users.Any(u => u.UserId == draw.userId))
                         {
                             Users.Add(new UserParticipant
                             {
+                                UserId = draw.userId,
+                                Username = joinedUsername,
                                 Initials = initials,
-                                ColorHex = "#4CAF50" // Đặt màu đại diện cho người khác
+                                ColorHex = "#4CAF50"
                             });
 
-                            // Thêm một dòng thông báo hệ thống lên góc màn hình vẽ
-                            NetworkLogs.Add($"[MẠNG] {joinedUsername} đã vào phòng.");
+                            Console.WriteLine($"-> Đã thêm '{joinedUsername}' vào UI.");
+
+                            // Thêm log chat hệ thống
+                            if (NetworkLogs != null)
+                            {
+                                NetworkLogs.Add($"[MẠNG] {joinedUsername} đã vào phòng.");
+                            }
+                        }
+                        else
+                        {
+                            Console.WriteLine("-> User này đã có trên UI, không thêm nữa.");
                         }
                     });
                     break;
@@ -769,39 +858,30 @@ namespace DrawClient.ViewModels
                             new Point(draw.x1, draw.y1),
                             new Point(draw.x2, draw.y2),
                             draw.color,
-                            draw.thickness));
+                            draw.thickness,
+                            draw.penType,
+                            draw.isHighlighter));
                     break;
 
-                case "ERASE":
+
+
+                case "LASER":
                     InvokeUI(() =>
-                        OnLineReceived?.Invoke(
+                        OnLaserReceived?.Invoke(
                             new Point(draw.x1, draw.y1),
-                            new Point(draw.x2, draw.y2),
-                            "#ERASE",
-                            draw.thickness));
+                            draw.color,
+                            draw.thickness,
+                            draw.penType,
+                            draw.userId));
                     break;
 
                 // 
                 case "UNDO":
-                    InvokeUI(() =>
-                    {
-                        if (UndoRedoManager.CanUndo())
-                        {
-                            UndoRedoManager.Undo();
-                            UpdateHistoryUI();
-                        }
-                    });
+                    ApplyUndoFromNetwork(draw.actionId, draw.userId);
                     break;
 
                 case "REDO":
-                    InvokeUI(() =>
-                    {
-                        if (UndoRedoManager.CanRedo())
-                        {
-                            UndoRedoManager.Redo();
-                            UpdateHistoryUI();
-                        }
-                    });
+                    ApplyRedoFromNetwork(draw.actionId, draw.userId);
                     break;
 
                 case "SHAPE":
@@ -818,6 +898,10 @@ namespace DrawClient.ViewModels
 
                 case "CLEAR":
                     InvokeUI(() => OnCanvasCleared?.Invoke());
+                    break;
+
+                case "TRANSFORM_SELECTION":
+                    InvokeUI(() => OnSelectionTransformedReceived?.Invoke(draw.text));
                     break;
 
                 case "LEAVE":
@@ -876,6 +960,13 @@ namespace DrawClient.ViewModels
                         });
                     });
                     break;
+                case "ERASE":
+                    InvokeUI(() =>
+                        OnEraseReceived?.Invoke(
+                            new Point(draw.x1, draw.y1),
+                            new Point(draw.x2, draw.y2),
+                            draw.thickness));
+                    break;
             }
         }
 
@@ -885,52 +976,105 @@ namespace DrawClient.ViewModels
         }
         public void SendDrawData(Point p1, Point p2)
         {
+            // 1. LASER POINTER: Không gửi laser lên server - chỉ là visual feedback tạm thời
+            if (Toolbar.CurrentPenType?.ToLower() == "laser")
+                return;
+
+            // 2. Tránh gửi dữ liệu khi khoảng cách di chuyển quá nhỏ hoặc trùng nhau
             if (Math.Abs(p1.X - p2.X) < 0.5 && Math.Abs(p1.Y - p2.Y) < 0.5)
                 return;
 
-            bool isEraser =
-                Toolbar.IsEraserSelected ||
-                SelectedTool?.ToLower() == "eraser";
+            bool isEraser = Toolbar.IsEraserSelected || SelectedTool?.ToLower() == "eraser";
             bool isShape = SelectedTool?.ToLower() == "shape";
 
+            // Khởi tạo message chứa các thông tin cơ bản chung
             var msg = new DrawMessage
             {
                 roomId = RoomId,
-                userId = ClientSocket.Instance.CurrentUserId, // Đảm bảo lấy ID từ Socket Instance
+                userId = ClientSocket.Instance.CurrentUserId,
                 username = ClientSocket.Instance.CurrentUsername,
                 x1 = p1.X,
                 y1 = p1.Y,
                 x2 = p2.X,
                 y2 = p2.Y,
-                thickness = isEraser ? Toolbar.EraserSize : Toolbar.CurrentThickness
+                penType = Toolbar.CurrentPenType
             };
 
-            // 3. Gán Type NHẤT QUÁN (Sửa lỗi mục 1)
+            // Đơn giản hóa cấu hình dữ liệu theo từng loại công cụ
             if (isEraser)
             {
                 msg.type = "ERASE";
                 msg.color = "#ERASE";
                 msg.thickness = Toolbar.EraserSize;
-                UndoRedoManager.AddAction(new DrawAction("ERASE", p1, p2, msg.color, msg.thickness, ClientSocket.Instance.CurrentUserId, ClientSocket.Instance.CurrentUsername, RoomId));
+                msg.isHighlighter = false;
             }
             else if (isShape)
             {
                 msg.type = "SHAPE";
                 msg.shapeType = CurrentShape;
                 msg.color = Toolbar.CurrentColor;
-                msg.thickness = Toolbar.PencilSize;
-                UndoRedoManager.AddAction(new DrawAction("SHAPE", p1, p2, msg.color, msg.thickness, ClientSocket.Instance.CurrentUserId, ClientSocket.Instance.CurrentUsername, RoomId) { ShapeType = CurrentShape });
+                msg.thickness = Toolbar.CurrentThickness; // Đã sửa: Đồng bộ chính xác độ dày của Shape
+                msg.isHighlighter = false;
             }
-            else
+            else // Trường hợp DRAW thông thường
             {
                 msg.type = "DRAW";
                 msg.color = Toolbar.CurrentColor;
                 msg.thickness = Toolbar.PencilSize;
-                UndoRedoManager.AddAction(new DrawAction("DRAW", p1, p2, msg.color, msg.thickness, ClientSocket.Instance.CurrentUserId, ClientSocket.Instance.CurrentUsername, RoomId));
+                msg.penType = Toolbar.CurrentPenType;
+
+                // Nếu là công cụ Highlighter (bút dạ quang), xử lý màu sắc đặc biệt
+                if (Toolbar.CurrentPenType?.ToLower() == "highlighter")
+                {
+                    msg.color = "[HL]" + msg.color;
+                    msg.isHighlighter = true;
+                }
+                else
+                {
+                    msg.isHighlighter = false;
+                }
             }
+
+
+            // 3. Gom việc thêm hành động vào quản lý Undo/Redo ra ngoài khối điều kiện
+            var drawAction = new DrawAction(
+                msg.type,
+                p1,
+                p2,
+                msg.color,
+                msg.thickness,
+                msg.userId,
+                msg.username,
+                RoomId
+            )
+            {
+                penType = msg.penType,
+                ShapeType = isShape ? CurrentShape : null
+            };
+            UndoRedoManager.AddAction(drawAction);
+
+            // 4. Gửi dữ liệu đã xử lý nhất quán sang server qua Socket
             if (p1.X == p2.X && p1.Y == p2.Y) return;
 
             ClientSocket.Instance.Send(msg);
+        }
+        public void SendSelectionTransform(string indicesData, Rect oldBounds, Rect newBounds)
+        {
+            // Ép kiểu chuỗi dạng InvariantCulture để dùng dấu chấm (.) cho số thực, bất chấp máy dùng Win Tiếng Việt hay Tiếng Anh
+            string transformData = string.Format(System.Globalization.CultureInfo.InvariantCulture,
+                "{0}|{1},{2},{3},{4}|{5},{6},{7},{8}",
+                indicesData,
+                oldBounds.X, oldBounds.Y, oldBounds.Width, oldBounds.Height,
+                newBounds.X, newBounds.Y, newBounds.Width, newBounds.Height);
+
+            ClientSocket.Instance.Send(new DrawMessage
+            {
+                type = "TRANSFORM_SELECTION",
+                roomId = RoomId,
+                userId = ClientSocket.Instance.CurrentUserId,
+                username = ClientSocket.Instance.CurrentUsername,
+                text = transformData
+            });
         }
         public void SendText(string text, Point p, double width, double height, double fontSize = 14)
         {
@@ -982,6 +1126,7 @@ namespace DrawClient.ViewModels
             ClientSocket.Instance.Send(msg);
 
             OnCanvasCleared?.Invoke();
+            UndoRedoManager.Clear();
         }
 
         private void ExecuteShowRoomInfo(object obj)
@@ -1054,53 +1199,102 @@ namespace DrawClient.ViewModels
 
         private void ExecuteUndo()
         {
-            if (UndoRedoManager.CanUndo())
+            int userId = ClientSocket.Instance.CurrentUserId;
+            if (UndoRedoManager.CanUndo(userId))
             {
-                UndoRedoManager.Undo(); // Event sẽ trigger HandleUndo tự động
+                var undone = UndoRedoManager.Undo(userId);
+                if (undone != null)
+                {
+                    // Send UNDO with specific actionId to server
+                    ClientSocket.Instance.Send(new DrawMessage
+                    {
+                        type = "UNDO",
+                        roomId = RoomId,
+                        userId = userId,
+                        username = ClientSocket.Instance.CurrentUsername,
+                        actionId = undone.Id
+                    });
+                    OnUndoRedo?.Invoke();
+                    UpdateHistoryUI();
+                }
             }
         }
 
         private void ExecuteRedo()
         {
-            if (UndoRedoManager.CanRedo())
+            int userId = ClientSocket.Instance.CurrentUserId;
+            if (UndoRedoManager.CanRedo(userId))
             {
-                UndoRedoManager.Redo(); // Event sẽ trigger HandleRedo tự động
+                var redone = UndoRedoManager.Redo(userId);
+                if (redone != null)
+                {
+                    // Send REDO with specific actionId to server
+                    ClientSocket.Instance.Send(new DrawMessage
+                    {
+                        type = "REDO",
+                        roomId = RoomId,
+                        userId = userId,
+                        username = ClientSocket.Instance.CurrentUsername,
+                        actionId = redone.Id
+                    });
+                    OnUndoRedo?.Invoke();
+                    UpdateHistoryUI();
+                }
             }
         }
 
-        // 🔥 THÊM 2 HÀM MỚI NÀY
-        private void HandleUndo(DrawAction undoneAction)
+        private void ApplyUndoFromNetwork(string actionId, int userId)
         {
-            // 1. Gửi lệnh UNDO lên server
-            var undoMsg = new DrawMessage
+            InvokeUI(() =>
             {
-                type = "UNDO",
-                roomId = RoomId,
-                userId = ClientSocket.Instance.CurrentUserId,
-                username = ClientSocket.Instance.CurrentUsername
-            };
-            ClientSocket.Instance.Send(undoMsg);
-            
-            // 2. Vẽ lại canvas từ action stack (trigger OnUndoRedo)
-            OnUndoRedo?.Invoke();
-            UpdateHistoryUI();
+                _isApplyingRemoteUndoRedo = true;
+                try
+                {
+                    DrawAction undone = null;
+                    if (!string.IsNullOrEmpty(actionId))
+                        undone = UndoRedoManager.UndoById(actionId);
+                    else
+                        undone = UndoRedoManager.Undo(userId);
+
+                    if (undone != null)
+                    {
+                        OnUndoRedo?.Invoke();
+                        Console.WriteLine($"[NETWORK] Undo action {undone.Id} by user {userId}");
+                    }
+                }
+                finally
+                {
+                    _isApplyingRemoteUndoRedo = false;
+                    UpdateHistoryUI();
+                }
+            });
         }
 
-        private void HandleRedo(DrawAction redoAction)
+        private void ApplyRedoFromNetwork(string actionId, int userId)
         {
-            // 1. Gửi lệnh REDO lên server
-            var redoMsg = new DrawMessage
+            InvokeUI(() =>
             {
-                type = "REDO",
-                roomId = RoomId,
-                userId = ClientSocket.Instance.CurrentUserId,
-                username = ClientSocket.Instance.CurrentUsername
-            };
-            ClientSocket.Instance.Send(redoMsg);
-            
-            // 2. Vẽ lại canvas từ action stack
-            OnUndoRedo?.Invoke();
-            UpdateHistoryUI();
+                _isApplyingRemoteUndoRedo = true;
+                try
+                {
+                    DrawAction redone = null;
+                    if (!string.IsNullOrEmpty(actionId))
+                        redone = UndoRedoManager.RedoById(actionId);
+                    else
+                        redone = UndoRedoManager.Redo(userId);
+
+                    if (redone != null)
+                    {
+                        OnUndoRedo?.Invoke();
+                        Console.WriteLine($"[NETWORK] Redo action {redone.Id} by user {userId}");
+                    }
+                }
+                finally
+                {
+                    _isApplyingRemoteUndoRedo = false;
+                    UpdateHistoryUI();
+                }
+            });
         }
 
         private void ExecuteClearHistory()
@@ -1109,10 +1303,154 @@ namespace DrawClient.ViewModels
             UpdateHistoryUI();
         }
 
+        private void TogglePlay()
+        {
+            if (IsPlaying)
+                StopPlay();
+            else
+                _ = PlayHistory();
+        }
+
+        public void StopPlay()
+        {
+            _playCts?.Cancel();
+            IsPlaying = false;
+            PlayProgress = 0;
+            PlayProgressText = "0%";
+        }
+
+        private async Task PlayHistory()
+        {
+            if (_rawHistory == null || _rawHistory.Count == 0)
+            {
+                MessageBox.Show("Không có lịch sử để phát lại!", "Play", MessageBoxButton.OK, MessageBoxImage.Information);
+                return;
+            }
+
+            IsPlaying = true;
+            PlayProgress = 0;
+            PlayProgressText = "0%";
+            _playCts = new CancellationTokenSource();
+            var token = _playCts.Token;
+
+            // Clear canvas before replay
+            OnCanvasCleared?.Invoke();
+
+            // Build actionId -> DrawMessage map from history for undo/redo lookup
+            var actionMap = new Dictionary<string, DrawMessage>();
+            var undoStack = new Stack<string>(); // Stack of undone actionIds for redo tracking
+            int currentIndex = 0;
+            int total = _rawHistory.Count;
+
+            try
+            {
+                foreach (var action in _rawHistory)
+                {
+                    token.ThrowIfCancellationRequested();
+
+                    // Calculate delay based on action type
+                    int delayMs = 50;
+                    if (action.type == "DRAW" || action.type == "ERASE")
+                        delayMs = 30;
+                    else if (action.type == "SHAPE" || action.type == "TEXT")
+                        delayMs = 100;
+                    else if (action.type == "UNDO" || action.type == "REDO")
+                        delayMs = 200;
+                    else if (action.type == "CLEAR")
+                        delayMs = 300;
+
+                    // Process the action
+                    switch (action.type)
+                    {
+                        case "DRAW":
+                        case "ERASE":
+                        case "SHAPE":
+                        case "TEXT":
+                            // Store with a generated actionId for undo/redo tracking
+                            if (string.IsNullOrEmpty(action.actionId))
+                                action.actionId = $"replay_{currentIndex}";
+                            actionMap[action.actionId] = action;
+
+                            if (action.type == "DRAW")
+                                OnReplayDraw?.Invoke(action);
+                            else if (action.type == "ERASE")
+                                OnReplayErase?.Invoke(action);
+                            else if (action.type == "SHAPE")
+                                OnReplayShape?.Invoke(action);
+                            else if (action.type == "TEXT")
+                                OnReplayText?.Invoke(action);
+                            break;
+
+                        case "UNDO":
+                            // Find the most recent non-undone action and undo it
+                            for (int i = currentIndex - 1; i >= 0; i--)
+                            {
+                                var prev = _rawHistory[i];
+                                if ((prev.type == "DRAW" || prev.type == "ERASE" ||
+                                     prev.type == "SHAPE" || prev.type == "TEXT") &&
+                                    !string.IsNullOrEmpty(prev.actionId) &&
+                                    actionMap.ContainsKey(prev.actionId))
+                                {
+                                    OnReplayUndo?.Invoke(prev.actionId);
+                                    undoStack.Push(prev.actionId); // Remember for redo
+                                    actionMap.Remove(prev.actionId);
+                                    break;
+                                }
+                            }
+                            break;
+
+                        case "REDO":
+                            // Redo the most recently undone action
+                            if (undoStack.Count > 0)
+                            {
+                                string redoActionId = undoStack.Pop();
+                                OnReplayRedo?.Invoke(redoActionId);
+                                // Find the original action data to restore in actionMap
+                                for (int i = currentIndex - 1; i >= 0; i--)
+                                {
+                                    var prev = _rawHistory[i];
+                                    if (prev.actionId == redoActionId)
+                                    {
+                                        actionMap[prev.actionId] = prev;
+                                        break;
+                                    }
+                                }
+                            }
+                            break;
+
+                        case "CLEAR":
+                            OnReplayClear?.Invoke();
+                            actionMap.Clear();
+                            undoStack.Clear();
+                            break;
+                    }
+
+                    currentIndex++;
+                    PlayProgress = (double)currentIndex / total * 100;
+                    PlayProgressText = $"{(int)PlayProgress}%";
+
+                    await Task.Delay(delayMs, token);
+                }
+
+                PlayProgress = 100;
+                PlayProgressText = "100%";
+            }
+            catch (OperationCanceledException)
+            {
+                // Play was stopped by user
+            }
+            finally
+            {
+                IsPlaying = false;
+                OnReplayFinished?.Invoke();
+            }
+        }
+
         private void UpdateHistoryUI()
         {
-            CanUndo = UndoRedoManager.CanUndo();
-            CanRedo = UndoRedoManager.CanRedo();
+            int userId = ClientSocket.Instance.CurrentUserId;
+            CanUndo = UndoRedoManager.CanUndo(userId);
+            CanRedo = UndoRedoManager.CanRedo(userId);
             HistoryInfo = $"History: {UndoRedoManager.UndoCount} Undo | {UndoRedoManager.RedoCount} Redo";
         }
         public void Cleanup()
@@ -1122,8 +1460,8 @@ namespace DrawClient.ViewModels
 
             _isCleanedUp = true;
 
+            StopPlay();
             ClientSocket.Instance.OnMessageReceived -= HandleSocketMessage;
-            UndoRedoManager.OnHistoryChanged -= UpdateHistoryUI;   // THÊM DÒNG NÀY
         }
 
         private string _currentChatMessage;
