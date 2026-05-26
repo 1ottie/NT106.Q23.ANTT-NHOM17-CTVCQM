@@ -11,6 +11,9 @@
             <converters:BoolToVisibilityConverter
             x:Key="BoolToVisibilityConverter"/>
 
+            <converters:BoolToPlayIconConverter
+            x:Key="BoolToPlayIconConverter"/>
+
         </ResourceDictionary>
 
     </Application.Resources>

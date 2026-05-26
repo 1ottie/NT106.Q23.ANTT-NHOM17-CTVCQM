@@ -391,7 +391,7 @@
                     </Button>
 
                     <!-- Redo -->
-                    <Button Command="{Binding UndoCommand}"
+                    <Button Command="{Binding RedoCommand}"
                     Width="36"
                     Height="36"
                     Background="Transparent"
@@ -432,7 +432,7 @@
                             <ColumnDefinition Width="50"/>
                         </Grid.ColumnDefinitions>
 
-                        <!-- Play -->
+                        <!-- Play / Stop -->
                         <Button Grid.Column="0"
                         Width="36"
                         Height="36"
@@ -440,9 +440,10 @@
                         BorderThickness="0"
                         VerticalAlignment="Center"
                         Cursor="Hand"
+                        Command="{Binding PlayCommand}"
                         Style="{StaticResource VectorToolStyle}">
 
-                            <Path Data="M5 3 L19 12 L5 21 Z"
+                            <Path Data="{Binding IsPlaying, Converter={StaticResource BoolToPlayIconConverter}}"
                           Stroke="#5F6368"
                           StrokeThickness="1.5"
                           Fill="Transparent"
@@ -460,7 +461,8 @@
                         <Slider Grid.Column="1"
                         Minimum="0"
                         Maximum="100"
-                        Value="0"
+                        Value="{Binding PlayProgress, Mode=OneWay}"
+                        IsEnabled="False"
                         VerticalAlignment="Center"
                         Margin="16,0">
 
@@ -551,7 +553,7 @@
 
                         <!-- Percent -->
                         <TextBlock Grid.Column="2"
-                           Text="0%"
+                           Text="{Binding PlayProgressText}"
                            Foreground="#5F6368"
                            VerticalAlignment="Center"
                            HorizontalAlignment="Right"
@@ -622,18 +624,30 @@
                 <Grid>
 
                     <!-- Canvas vẽ -->
-                    <InkCanvas x:Name="inkCanvas"/>
+                    <InkCanvas x:Name="inkCanvas" IsHitTestVisible="False" EditingMode="None"/>
 
                     <!-- Laser pointer -->
                     <Canvas x:Name="laserCanvas"
-            IsHitTestVisible="False">
+                            IsHitTestVisible="False"
+                            Panel.ZIndex="50">
 
                         <Ellipse x:Name="laserDot"
-                 Width="24"
-                 Height="24"
-                 Fill="Red"
-                 Opacity="0"
-                 Visibility="Collapsed"/>
+                                 Width="24"
+                                 Height="24"
+                                 Opacity="0"
+                                 Visibility="Collapsed"
+                                 IsHitTestVisible="False">
+                            <Ellipse.Fill>
+                                <RadialGradientBrush GradientOrigin="0.5,0.5" Center="0.5,0.5" RadiusX="0.5" RadiusY="0.5">
+                                    <GradientStop Color="#FFFFE066" Offset="0"/>
+                                    <GradientStop Color="#80FF6A00" Offset="0.5"/>
+                                    <GradientStop Color="#00FF6A00" Offset="1"/>
+                                </RadialGradientBrush>
+                            </Ellipse.Fill>
+                            <Ellipse.Effect>
+                                <DropShadowEffect Color="#FFFFA000" BlurRadius="18" ShadowDepth="0" Opacity="0.9"/>
+                            </Ellipse.Effect>
+                        </Ellipse>
                     </Canvas>
 
                 </Grid>
