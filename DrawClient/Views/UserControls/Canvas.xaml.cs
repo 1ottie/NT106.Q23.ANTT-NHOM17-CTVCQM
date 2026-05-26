@@ -19,6 +19,8 @@ using System.Windows.Media.Imaging;
 using System.Windows.Shapes;
 using System.Windows.Threading;
 
+// For replay undo/redo tracking
+
 namespace DrawClient.Views.UserControls
 {
     public partial class Canvas : UserControl
@@ -40,6 +42,11 @@ namespace DrawClient.Views.UserControls
         private Dictionary<string, (Polyline Line, DispatcherTimer Timer)> _remoteLasers = new Dictionary<string, (Polyline, DispatcherTimer)>();
         //khai bái biến lưu vị trí cũ
         private Rect _oldSelectionBounds;
+
+        // Replay: maps actionId -> Stroke for undo/redo during playback
+        private Dictionary<string, Stroke> _replayStrokeMap = new Dictionary<string, Stroke>();
+        private Dictionary<string, DrawMessage> _replayActionMap = new Dictionary<string, DrawMessage>();
+        private HashSet<string> _replayUndoneActions = new HashSet<string>();
 
 
         public Canvas()
@@ -102,6 +109,14 @@ namespace DrawClient.Views.UserControls
                 _viewModel.OnShapeReceived -= DrawShape;
                 _viewModel.OnTextReceived -= DrawText;
                 _viewModel.OnDeleteTextReceived -= DeleteTextFromNetwork;
+                _viewModel.OnReplayDraw -= ReplayDraw;
+                _viewModel.OnReplayErase -= ReplayErase;
+                _viewModel.OnReplayShape -= ReplayShape;
+                _viewModel.OnReplayText -= ReplayText;
+                _viewModel.OnReplayUndo -= ReplayUndo;
+                _viewModel.OnReplayRedo -= ReplayRedo;
+                _viewModel.OnReplayClear -= ReplayClear;
+                _viewModel.OnReplayFinished -= ReplayFinished;
                 // FIX SOCKET MEMORY LEAK
                 _viewModel.Cleanup();
             }
@@ -226,6 +241,16 @@ namespace DrawClient.Views.UserControls
 
                 UpdateCurrentDrawingAttributes(_viewModel);
                 _viewModel.OnUndoRedo += RedrawAllFromActions;
+
+                // Replay/Play events
+                _viewModel.OnReplayDraw += ReplayDraw;
+                _viewModel.OnReplayErase += ReplayErase;
+                _viewModel.OnReplayShape += ReplayShape;
+                _viewModel.OnReplayText += ReplayText;
+                _viewModel.OnReplayUndo += ReplayUndo;
+                _viewModel.OnReplayRedo += ReplayRedo;
+                _viewModel.OnReplayClear += ReplayClear;
+                _viewModel.OnReplayFinished += ReplayFinished;
             }
         }
 
@@ -242,6 +267,239 @@ namespace DrawClient.Views.UserControls
                 }
             });
         }
+
+        #region Replay/Play Handlers
+
+        private void ReplayDraw(DrawMessage msg)
+        {
+            Application.Current.Dispatcher.Invoke(() =>
+            {
+                try
+                {
+                    string colorStr = msg.color ?? "#000000";
+                    bool isHighlighter = msg.isHighlighter || colorStr.StartsWith("[HL]");
+                    string colorToUse = colorStr.Replace("[HL]", "");
+
+                    if (string.IsNullOrWhiteSpace(colorToUse))
+                        colorToUse = "#000000";
+
+                    StylusPointCollection points = new StylusPointCollection
+                    {
+                        new StylusPoint(msg.x1, msg.y1),
+                        new StylusPoint(msg.x2, msg.y2)
+                    };
+
+                    Color parsedColor = (Color)ColorConverter.ConvertFromString(colorToUse);
+                    bool isFountain = string.Equals(msg.penType?.Trim(), "fountain", StringComparison.OrdinalIgnoreCase);
+
+                    DrawingAttributes da = new DrawingAttributes
+                    {
+                        Color = parsedColor,
+                        IgnorePressure = true,
+                        IsHighlighter = isHighlighter
+                    };
+
+                    if (isHighlighter)
+                    {
+                        da.Width = msg.thickness * 1.5;
+                        da.Height = msg.thickness * 1.5;
+                        da.StylusTip = StylusTip.Rectangle;
+                        da.FitToCurve = false;
+                    }
+                    else if (isFountain)
+                    {
+                        da.StylusTip = StylusTip.Rectangle;
+                        da.Width = msg.thickness * 0.8;
+                        da.Height = msg.thickness * 1.8;
+                        da.FitToCurve = true;
+                        da.IsHighlighter = false;
+                    }
+                    else
+                    {
+                        da.Width = msg.thickness;
+                        da.Height = msg.thickness;
+                        da.StylusTip = StylusTip.Ellipse;
+                        da.FitToCurve = true;
+                    }
+
+                    Stroke stroke = new Stroke(points) { DrawingAttributes = da };
+                    MyCanvas.Strokes.Add(stroke);
+
+                    // Track for undo/redo during replay
+                    if (!string.IsNullOrEmpty(msg.actionId))
+                    {
+                        _replayStrokeMap[msg.actionId] = stroke;
+                        _replayActionMap[msg.actionId] = msg;
+                    }
+                }
+                catch { }
+            });
+        }
+
+        private void ReplayErase(DrawMessage msg)
+        {
+            Application.Current.Dispatcher.Invoke(() =>
+            {
+                try
+                {
+                    double safeThickness = Math.Max(2.0, msg.thickness);
+                    Point start = new Point(msg.x1, msg.y1);
+                    Point end = new Point(msg.x2, msg.y2);
+
+                    if (start.X == end.X && start.Y == end.Y)
+                        end = new Point(start.X + 0.1, start.Y + 0.1);
+
+                    MyCanvas.Strokes.Erase(
+                        new Point[] { start, end },
+                        new EllipseStylusShape(safeThickness, safeThickness));
+                }
+                catch { }
+            });
+        }
+
+        private void ReplayShape(DrawMessage msg)
+        {
+            Application.Current.Dispatcher.Invoke(() =>
+            {
+                try
+                {
+                    StylusPointCollection points = null;
+                    Point start = new Point(msg.x1, msg.y1);
+                    Point end = new Point(msg.x2, msg.y2);
+
+                    switch (msg.shapeType?.ToLower())
+                    {
+                        case "rectangle":
+                        case "square":
+                            points = CreateRectanglePoints(start, end);
+                            break;
+                        case "ellipse":
+                        case "circle":
+                            points = CreateEllipsePoints(start, end);
+                            break;
+                        case "triangle":
+                            points = CreateTrianglePoints(start, end);
+                            break;
+                        case "line":
+                            points = CreateLinePoints(start, end);
+                            break;
+                    }
+
+                    if (points == null) return;
+
+                    Stroke stroke = new Stroke(points)
+                    {
+                        DrawingAttributes = new DrawingAttributes
+                        {
+                            Color = (Color)ColorConverter.ConvertFromString(msg.color ?? "#000000"),
+                            Width = msg.thickness,
+                            Height = msg.thickness,
+                            FitToCurve = false,
+                            IgnorePressure = true
+                        }
+                    };
+
+                    MyCanvas.Strokes.Add(stroke);
+
+                    if (!string.IsNullOrEmpty(msg.actionId))
+                    {
+                        _replayStrokeMap[msg.actionId] = stroke;
+                        _replayActionMap[msg.actionId] = msg;
+                    }
+                }
+                catch { }
+            });
+        }
+
+        private void ReplayText(DrawMessage msg)
+        {
+            Application.Current.Dispatcher.Invoke(() =>
+            {
+                try
+                {
+                    TextBlock tb = new TextBlock
+                    {
+                        Text = msg.text,
+                        FontSize = msg.fontSize > 0 ? msg.fontSize : 14,
+                        Foreground = new SolidColorBrush((Color)ColorConverter.ConvertFromString(msg.color ?? "#000000")),
+                        Background = Brushes.Transparent
+                    };
+
+                    InkCanvas.SetLeft(tb, msg.x1);
+                    InkCanvas.SetTop(tb, msg.y1);
+                    MyCanvas.Children.Add(tb);
+
+                    if (msg.x2 > 0 && msg.y2 > 0)
+                        MyCanvas.Strokes.Erase(new Rect(msg.x1, msg.y1, msg.x2, msg.y2));
+                }
+                catch { }
+            });
+        }
+
+        private void ReplayUndo(string actionId)
+        {
+            Application.Current.Dispatcher.Invoke(() =>
+            {
+                if (_replayStrokeMap.TryGetValue(actionId, out var stroke))
+                {
+                    MyCanvas.Strokes.Remove(stroke);
+                    _replayUndoneActions.Add(actionId);
+                }
+            });
+        }
+
+        private void ReplayRedo(string actionId)
+        {
+            Application.Current.Dispatcher.Invoke(() =>
+            {
+                if (_replayUndoneActions.Contains(actionId))
+                {
+                    // Re-add the stroke to canvas
+                    if (_replayStrokeMap.TryGetValue(actionId, out var stroke))
+                    {
+                        if (!MyCanvas.Strokes.Contains(stroke))
+                            MyCanvas.Strokes.Add(stroke);
+                    }
+                    _replayUndoneActions.Remove(actionId);
+                }
+            });
+        }
+
+        private void ReplayClear()
+        {
+            Application.Current.Dispatcher.Invoke(() =>
+            {
+                MyCanvas.Strokes.Clear();
+                MyCanvas.Children.Clear();
+                _replayStrokeMap.Clear();
+                _replayActionMap.Clear();
+                _replayUndoneActions.Clear();
+            });
+        }
+
+        private void ReplayFinished()
+        {
+            Application.Current.Dispatcher.Invoke(() =>
+            {
+                // Restore the current canvas state after replay
+                MyCanvas.Strokes.Clear();
+                MyCanvas.Children.Clear();
+                _replayStrokeMap.Clear();
+                _replayActionMap.Clear();
+                _replayUndoneActions.Clear();
+
+                if (_viewModel != null)
+                {
+                    var activeActions = _viewModel.UndoRedoManager.GetAllActions();
+                    foreach (var action in activeActions)
+                    {
+                        DrawSingleAction(action);
+                    }
+                }
+            });
+        }
+
+        #endregion
 
         private void DrawSingleAction(DrawAction action)
         {

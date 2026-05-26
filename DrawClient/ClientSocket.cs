@@ -299,6 +299,8 @@ namespace DrawClient
                         type == "CHAT" ||
                         type == "DELETE_TEXT" ||
                         type == "LEAVE" ||
+                        type == "UNDO" ||
+                        type == "REDO" ||
                         type == "LASER"||
                         type == "TRANSFORM_SELECTION"
                     )

@@ -33,6 +33,7 @@ namespace DrawServer
         public string content { get; set; }
         public DateTime timestamp { get; set; }
         public string actionToUndoId { get; set; } // ID của action bị undo
+        public string actionId { get; set; } // ID of specific action for UNDO/REDO sync
         public int undoCount { get; set; } // Số lần undo
         public List<DrawMessage> actions { get; set; }
     }

@@ -2,6 +2,7 @@
 using DrawClient.Services;
 using DrawClient.ViewModels.Canvas;
 using System;
+using System.Collections.Generic;
 using System.Collections.ObjectModel;
 using System.ComponentModel;
 using System.Drawing.Drawing2D;
@@ -9,6 +10,7 @@ using System.Linq;
 using System.Runtime.CompilerServices;
 using System.Runtime.InteropServices;
 using System.Text.Json;
+using System.Threading;
 using System.Threading.Tasks;
 using System.Windows;
 using System.Windows.Controls;
@@ -42,6 +44,20 @@ namespace DrawClient.ViewModels
         public UndoRedoManager UndoRedoManager { get; private set; } = new UndoRedoManager();
         public event Action OnUndoRedo;
         private bool _isCleanedUp = false;
+        private bool _isApplyingRemoteUndoRedo = false;
+
+        // Replay/Play events - View subscribes to render each step
+        public event Action<DrawMessage> OnReplayDraw;
+        public event Action<DrawMessage> OnReplayErase;
+        public event Action<DrawMessage> OnReplayShape;
+        public event Action<DrawMessage> OnReplayText;
+        public event Action<string> OnReplayUndo;   // actionId to undo
+        public event Action<string> OnReplayRedo;   // actionId to redo
+        public event Action OnReplayClear;
+        public event Action OnReplayFinished;
+
+        private List<DrawMessage> _rawHistory = new List<DrawMessage>();
+        private CancellationTokenSource _playCts;
 
 
         #region Properties
@@ -153,6 +169,27 @@ namespace DrawClient.ViewModels
             set { _historyInfo = value; OnPropertyChanged(); }
         }
 
+        private bool _isPlaying = false;
+        public bool IsPlaying
+        {
+            get => _isPlaying;
+            set { _isPlaying = value; OnPropertyChanged(); }
+        }
+
+        private double _playProgress = 0;
+        public double PlayProgress
+        {
+            get => _playProgress;
+            set { _playProgress = value; OnPropertyChanged(); }
+        }
+
+        private string _playProgressText = "0%";
+        public string PlayProgressText
+        {
+            get => _playProgressText;
+            set { _playProgressText = value; OnPropertyChanged(); }
+        }
+
         #endregion
 
         #region Commands
@@ -174,6 +211,7 @@ namespace DrawClient.ViewModels
         public ICommand UndoCommand { get; }
         public ICommand RedoCommand { get; }
         public ICommand ClearHistoryCommand { get; }
+        public ICommand PlayCommand { get; }
 
         public ICommand SendChatMessageCommand { get; }
 
@@ -244,14 +282,12 @@ namespace DrawClient.ViewModels
 
             ClearCanvasCommand = new RelayCommand(ExecuteClearCanvas);
             // Undo/Redo
-            UndoRedoManager.OnUndo += HandleUndo;
-            UndoRedoManager.OnRedo += HandleRedo;
-            UndoRedoManager.OnHistoryChanged += UpdateHistoryUI;
             UpdateHistoryUI();
 
             UndoCommand = new RelayCommand(_ => ExecuteUndo(), _ => CanUndo);
             RedoCommand = new RelayCommand(_ => ExecuteRedo(), _ => CanRedo);
             ClearHistoryCommand = new RelayCommand(_ => ExecuteClearHistory());
+            PlayCommand = new RelayCommand(_ => TogglePlay());
 
             string safeUsername =
                 LoginViewModel.CurrentUsername
@@ -547,15 +583,24 @@ namespace DrawClient.ViewModels
                         if (!doc.RootElement.TryGetProperty("actions", out var actions))
                             return;
 
+                        // Store raw history for Play feature
+                        _rawHistory.Clear();
+                        foreach (var item in actions.EnumerateArray())
+                        {
+                            var h = JsonSerializer.Deserialize<DrawMessage>(item.GetRawText(), _jsonOptions);
+                            if (h != null) _rawHistory.Add(h);
+                        }
+
+                        // Pass 1: Replay all actions in order to build correct canvas state
                         foreach (var item in actions.EnumerateArray())
                         {
                             var draw = JsonSerializer.Deserialize<DrawMessage>(item.GetRawText(), _jsonOptions);
                             if (draw == null) continue;
-                            DispatchDraw(draw);
 
                             if (draw.type == "DRAW" || draw.type == "ERASE" || draw.type == "SHAPE" || draw.type == "TEXT")
                             {
-                                UndoRedoManager.AddAction(new DrawAction(
+                                // Add to undo manager (creates action with ID)
+                                var action = new DrawAction(
                                     draw.type,
                                     new Point(draw.x1, draw.y1),
                                     new Point(draw.x2, draw.y2),
@@ -563,10 +608,53 @@ namespace DrawClient.ViewModels
                                     draw.thickness,
                                     draw.userId,
                                     draw.username,
-                                    RoomId));
+                                    RoomId);
+                                UndoRedoManager.AddAction(action);
+                                // Store the actionId in the draw message for later reference
+                                draw.actionId = action.Id;
+                            }
+                            else if (draw.type == "UNDO")
+                            {
+                                // Find the most recent non-undone action by this user and undo it
+                                UndoRedoManager.Undo(draw.userId);
+                            }
+                            else if (draw.type == "REDO")
+                            {
+                                UndoRedoManager.Redo(draw.userId);
+                            }
+                            else if (draw.type == "CLEAR")
+                            {
+                                UndoRedoManager.Clear();
                             }
                         }
 
+                        // Pass 2: Render only active (non-undone) actions on canvas
+                        InvokeUI(() =>
+                        {
+                            OnCanvasCleared?.Invoke();
+                            var activeActions = UndoRedoManager.GetAllActions();
+                            foreach (var action in activeActions)
+                            {
+                                // Re-dispatch each active action to render on canvas
+                                var redrawMsg = new DrawMessage
+                                {
+                                    type = action.ActionType,
+                                    x1 = action.StartPoint.X,
+                                    y1 = action.StartPoint.Y,
+                                    x2 = action.EndPoint.X,
+                                    y2 = action.EndPoint.Y,
+                                    color = action.Color,
+                                    thickness = action.Thickness,
+                                    penType = action.penType,
+                                    shapeType = action.ShapeType,
+                                    text = action.Text,
+                                    fontSize = action.FontSize
+                                };
+                                DispatchDraw(redrawMsg);
+                            }
+                        });
+
+                        UpdateHistoryUI();
                         return;
                     }
 
@@ -689,29 +777,18 @@ namespace DrawClient.ViewModels
                         case "UNDO":
                             if (drawMsg.userId == ClientSocket.Instance.CurrentUserId)
                                 return;
-                            InvokeUI(() =>
-                            {
-                                if (UndoRedoManager.CanUndo())
-                                {
-                                    UndoRedoManager.Undo();
-                                    UpdateHistoryUI();
-                                    Console.WriteLine($"[NETWORK] Undo from {drawMsg.username}");
-                                }
-                            });
+                            ApplyUndoFromNetwork(drawMsg.actionId, drawMsg.userId);
                             break;
 
                         case "REDO":
                             if (drawMsg.userId == ClientSocket.Instance.CurrentUserId)
                                 return;
-                            InvokeUI(() =>
-                            {
-                                if (UndoRedoManager.CanRedo())
-                                {
-                                    UndoRedoManager.Redo();
-                                    UpdateHistoryUI();
-                                    Console.WriteLine($"[NETWORK] Redo from {drawMsg.username}");
-                                }
-                            });
+                            ApplyRedoFromNetwork(drawMsg.actionId, drawMsg.userId);
+                            break;
+
+                        case "CLEAR":
+                            DispatchDraw(drawMsg);
+                            UndoRedoManager.Clear();
                             break;
 
                         default:
@@ -800,25 +877,11 @@ namespace DrawClient.ViewModels
 
                 // 
                 case "UNDO":
-                    InvokeUI(() =>
-                    {
-                        if (UndoRedoManager.CanUndo())
-                        {
-                            UndoRedoManager.Undo();
-                            UpdateHistoryUI();
-                        }
-                    });
+                    ApplyUndoFromNetwork(draw.actionId, draw.userId);
                     break;
 
                 case "REDO":
-                    InvokeUI(() =>
-                    {
-                        if (UndoRedoManager.CanRedo())
-                        {
-                            UndoRedoManager.Redo();
-                            UpdateHistoryUI();
-                        }
-                    });
+                    ApplyRedoFromNetwork(draw.actionId, draw.userId);
                     break;
 
                 case "SHAPE":
@@ -1063,6 +1126,7 @@ namespace DrawClient.ViewModels
             ClientSocket.Instance.Send(msg);
 
             OnCanvasCleared?.Invoke();
+            UndoRedoManager.Clear();
         }
 
         private void ExecuteShowRoomInfo(object obj)
@@ -1135,53 +1199,102 @@ namespace DrawClient.ViewModels
 
         private void ExecuteUndo()
         {
-            if (UndoRedoManager.CanUndo())
+            int userId = ClientSocket.Instance.CurrentUserId;
+            if (UndoRedoManager.CanUndo(userId))
             {
-                UndoRedoManager.Undo(); // Event sẽ trigger HandleUndo tự động
+                var undone = UndoRedoManager.Undo(userId);
+                if (undone != null)
+                {
+                    // Send UNDO with specific actionId to server
+                    ClientSocket.Instance.Send(new DrawMessage
+                    {
+                        type = "UNDO",
+                        roomId = RoomId,
+                        userId = userId,
+                        username = ClientSocket.Instance.CurrentUsername,
+                        actionId = undone.Id
+                    });
+                    OnUndoRedo?.Invoke();
+                    UpdateHistoryUI();
+                }
             }
         }
 
         private void ExecuteRedo()
         {
-            if (UndoRedoManager.CanRedo())
+            int userId = ClientSocket.Instance.CurrentUserId;
+            if (UndoRedoManager.CanRedo(userId))
             {
-                UndoRedoManager.Redo(); // Event sẽ trigger HandleRedo tự động
+                var redone = UndoRedoManager.Redo(userId);
+                if (redone != null)
+                {
+                    // Send REDO with specific actionId to server
+                    ClientSocket.Instance.Send(new DrawMessage
+                    {
+                        type = "REDO",
+                        roomId = RoomId,
+                        userId = userId,
+                        username = ClientSocket.Instance.CurrentUsername,
+                        actionId = redone.Id
+                    });
+                    OnUndoRedo?.Invoke();
+                    UpdateHistoryUI();
+                }
             }
         }
 
-        // 🔥 THÊM 2 HÀM MỚI NÀY
-        private void HandleUndo(DrawAction undoneAction)
+        private void ApplyUndoFromNetwork(string actionId, int userId)
         {
-            // 1. Gửi lệnh UNDO lên server
-            var undoMsg = new DrawMessage
+            InvokeUI(() =>
             {
-                type = "UNDO",
-                roomId = RoomId,
-                userId = ClientSocket.Instance.CurrentUserId,
-                username = ClientSocket.Instance.CurrentUsername
-            };
-            ClientSocket.Instance.Send(undoMsg);
+                _isApplyingRemoteUndoRedo = true;
+                try
+                {
+                    DrawAction undone = null;
+                    if (!string.IsNullOrEmpty(actionId))
+                        undone = UndoRedoManager.UndoById(actionId);
+                    else
+                        undone = UndoRedoManager.Undo(userId);
 
-            // 2. Vẽ lại canvas từ action stack (trigger OnUndoRedo)
-            OnUndoRedo?.Invoke();
-            UpdateHistoryUI();
+                    if (undone != null)
+                    {
+                        OnUndoRedo?.Invoke();
+                        Console.WriteLine($"[NETWORK] Undo action {undone.Id} by user {userId}");
+                    }
+                }
+                finally
+                {
+                    _isApplyingRemoteUndoRedo = false;
+                    UpdateHistoryUI();
+                }
+            });
         }
 
-        private void HandleRedo(DrawAction redoAction)
+        private void ApplyRedoFromNetwork(string actionId, int userId)
         {
-            // 1. Gửi lệnh REDO lên server
-            var redoMsg = new DrawMessage
+            InvokeUI(() =>
             {
-                type = "REDO",
-                roomId = RoomId,
-                userId = ClientSocket.Instance.CurrentUserId,
-                username = ClientSocket.Instance.CurrentUsername
-            };
-            ClientSocket.Instance.Send(redoMsg);
+                _isApplyingRemoteUndoRedo = true;
+                try
+                {
+                    DrawAction redone = null;
+                    if (!string.IsNullOrEmpty(actionId))
+                        redone = UndoRedoManager.RedoById(actionId);
+                    else
+                        redone = UndoRedoManager.Redo(userId);
 
-            // 2. Vẽ lại canvas từ action stack
-            OnUndoRedo?.Invoke();
-            UpdateHistoryUI();
+                    if (redone != null)
+                    {
+                        OnUndoRedo?.Invoke();
+                        Console.WriteLine($"[NETWORK] Redo action {redone.Id} by user {userId}");
+                    }
+                }
+                finally
+                {
+                    _isApplyingRemoteUndoRedo = false;
+                    UpdateHistoryUI();
+                }
+            });
         }
 
         private void ExecuteClearHistory()
@@ -1190,10 +1303,154 @@ namespace DrawClient.ViewModels
             UpdateHistoryUI();
         }
 
+        private void TogglePlay()
+        {
+            if (IsPlaying)
+                StopPlay();
+            else
+                _ = PlayHistory();
+        }
+
+        public void StopPlay()
+        {
+            _playCts?.Cancel();
+            IsPlaying = false;
+            PlayProgress = 0;
+            PlayProgressText = "0%";
+        }
+
+        private async Task PlayHistory()
+        {
+            if (_rawHistory == null || _rawHistory.Count == 0)
+            {
+                MessageBox.Show("Không có lịch sử để phát lại!", "Play", MessageBoxButton.OK, MessageBoxImage.Information);
+                return;
+            }
+
+            IsPlaying = true;
+            PlayProgress = 0;
+            PlayProgressText = "0%";
+            _playCts = new CancellationTokenSource();
+            var token = _playCts.Token;
+
+            // Clear canvas before replay
+            OnCanvasCleared?.Invoke();
+
+            // Build actionId -> DrawMessage map from history for undo/redo lookup
+            var actionMap = new Dictionary<string, DrawMessage>();
+            var undoStack = new Stack<string>(); // Stack of undone actionIds for redo tracking
+            int currentIndex = 0;
+            int total = _rawHistory.Count;
+
+            try
+            {
+                foreach (var action in _rawHistory)
+                {
+                    token.ThrowIfCancellationRequested();
+
+                    // Calculate delay based on action type
+                    int delayMs = 50;
+                    if (action.type == "DRAW" || action.type == "ERASE")
+                        delayMs = 30;
+                    else if (action.type == "SHAPE" || action.type == "TEXT")
+                        delayMs = 100;
+                    else if (action.type == "UNDO" || action.type == "REDO")
+                        delayMs = 200;
+                    else if (action.type == "CLEAR")
+                        delayMs = 300;
+
+                    // Process the action
+                    switch (action.type)
+                    {
+                        case "DRAW":
+                        case "ERASE":
+                        case "SHAPE":
+                        case "TEXT":
+                            // Store with a generated actionId for undo/redo tracking
+                            if (string.IsNullOrEmpty(action.actionId))
+                                action.actionId = $"replay_{currentIndex}";
+                            actionMap[action.actionId] = action;
+
+                            if (action.type == "DRAW")
+                                OnReplayDraw?.Invoke(action);
+                            else if (action.type == "ERASE")
+                                OnReplayErase?.Invoke(action);
+                            else if (action.type == "SHAPE")
+                                OnReplayShape?.Invoke(action);
+                            else if (action.type == "TEXT")
+                                OnReplayText?.Invoke(action);
+                            break;
+
+                        case "UNDO":
+                            // Find the most recent non-undone action and undo it
+                            for (int i = currentIndex - 1; i >= 0; i--)
+                            {
+                                var prev = _rawHistory[i];
+                                if ((prev.type == "DRAW" || prev.type == "ERASE" ||
+                                     prev.type == "SHAPE" || prev.type == "TEXT") &&
+                                    !string.IsNullOrEmpty(prev.actionId) &&
+                                    actionMap.ContainsKey(prev.actionId))
+                                {
+                                    OnReplayUndo?.Invoke(prev.actionId);
+                                    undoStack.Push(prev.actionId); // Remember for redo
+                                    actionMap.Remove(prev.actionId);
+                                    break;
+                                }
+                            }
+                            break;
+
+                        case "REDO":
+                            // Redo the most recently undone action
+                            if (undoStack.Count > 0)
+                            {
+                                string redoActionId = undoStack.Pop();
+                                OnReplayRedo?.Invoke(redoActionId);
+                                // Find the original action data to restore in actionMap
+                                for (int i = currentIndex - 1; i >= 0; i--)
+                                {
+                                    var prev = _rawHistory[i];
+                                    if (prev.actionId == redoActionId)
+                                    {
+                                        actionMap[prev.actionId] = prev;
+                                        break;
+                                    }
+                                }
+                            }
+                            break;
+
+                        case "CLEAR":
+                            OnReplayClear?.Invoke();
+                            actionMap.Clear();
+                            undoStack.Clear();
+                            break;
+                    }
+
+                    currentIndex++;
+                    PlayProgress = (double)currentIndex / total * 100;
+                    PlayProgressText = $"{(int)PlayProgress}%";
+
+                    await Task.Delay(delayMs, token);
+                }
+
+                PlayProgress = 100;
+                PlayProgressText = "100%";
+            }
+            catch (OperationCanceledException)
+            {
+                // Play was stopped by user
+            }
+            finally
+            {
+                IsPlaying = false;
+                OnReplayFinished?.Invoke();
+            }
+        }
+
         private void UpdateHistoryUI()
         {
-            CanUndo = UndoRedoManager.CanUndo();
-            CanRedo = UndoRedoManager.CanRedo();
+            int userId = ClientSocket.Instance.CurrentUserId;
+            CanUndo = UndoRedoManager.CanUndo(userId);
+            CanRedo = UndoRedoManager.CanRedo(userId);
             HistoryInfo = $"History: {UndoRedoManager.UndoCount} Undo | {UndoRedoManager.RedoCount} Redo";
         }
         public void Cleanup()
@@ -1203,8 +1460,8 @@ namespace DrawClient.ViewModels
 
             _isCleanedUp = true;
 
+            StopPlay();
             ClientSocket.Instance.OnMessageReceived -= HandleSocketMessage;
-            UndoRedoManager.OnHistoryChanged -= UpdateHistoryUI;   // THÊM DÒNG NÀY
         }
 
         private string _currentChatMessage;

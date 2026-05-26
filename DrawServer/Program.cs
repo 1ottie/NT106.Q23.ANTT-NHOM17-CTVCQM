@@ -10,7 +10,7 @@ namespace DrawServer
             Console.Title = "Node Server - Drawing App";
             int port = 6001; // Port chạy Socket của Node vẽ này
 
-            string connectionString = "server=127.0.0.1;database=online_Drawing_DB;user=root;password=";
+            string connectionString = "server=192.168.2.2;database=online_Drawing_DB;user=root;password=182806";
             var cleanupService = new RoomCleanupService(connectionString);
 
             Console.Title = "Node Server - Drawing App";

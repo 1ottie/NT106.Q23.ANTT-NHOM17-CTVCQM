@@ -16,7 +16,7 @@ namespace DrawServer
     public class ServerSocket
     {
         private string connectionString =
-            "server=localhost;database=online_Drawing_DB;user=root;password=";
+            "server=192.168.2.2;database=online_Drawing_DB;user=root;password=182806";
 
         private TcpListener server;
 
@@ -33,7 +33,7 @@ namespace DrawServer
         
         private bool _isRunning = true;
         private static readonly HttpClient _httpClient = new HttpClient();
-        private const string MasterApiUrl = "http://localhost:5274/api/room/update-status";
+        private const string MasterApiUrl = "http://192.168.2.2:5274/api/room/update-status";
 
         public void Start(int port)
         {
@@ -332,13 +332,25 @@ namespace DrawServer
 
                 else if (msg.type == "UNDO")
                 {
-                    // Broadcast UNDO command để tất cả client cùng undo
+                    if (clientMetadata.TryGetValue(client, out var metadata))
+                    {
+                        msg.userId = metadata.UserId;
+                        msg.username = metadata.Username;
+                    }
+
+                    SaveDrawAction(msg);
                     string undoJson = JsonSerializer.Serialize(msg);
                     BroadcastToRoom(msg.roomId, undoJson, client);
                 }
                 else if (msg.type == "REDO")
                 {
-                    // Broadcast REDO command để tất cả client cùng redo
+                    if (clientMetadata.TryGetValue(client, out var metadata))
+                    {
+                        msg.userId = metadata.UserId;
+                        msg.username = metadata.Username;
+                    }
+
+                    SaveDrawAction(msg);
                     string redoJson = JsonSerializer.Serialize(msg);
                     BroadcastToRoom(msg.roomId, redoJson, client);
                 }
@@ -379,7 +391,7 @@ namespace DrawServer
 
                 var registerPayload = new
                 {
-                    ip_address = "127.0.0.1", // Nếu chạy khác máy, hãy đổi thành IP LAN/WAN của máy này
+                    ip_address = "192.168.2.2",
                     port = _currentNodePort
                 };
 
@@ -387,7 +399,7 @@ namespace DrawServer
                 var content = new StringContent(jsonString, Encoding.UTF8, "application/json");
 
                 // Gửi POST Request lên API của Master Server (Cổng 5274)
-                var response = await _httpClient.PostAsync("http://localhost:5274/api/node/register", content);
+                var response = await _httpClient.PostAsync("http://192.168.2.2:5274/api/node/register", content);
 
                 if (response.IsSuccessStatusCode)
                 {
@@ -411,7 +423,7 @@ namespace DrawServer
             catch (Exception ex)
             {
                 Console.ForegroundColor = ConsoleColor.Red;
-                Console.WriteLine($"[NODE SERVER] LỖI MẠNG: Không thể kết nối tới Master Server tại địa chỉ http://localhost:5274");
+                Console.WriteLine($"[NODE SERVER] LỖI MẠNG: Không thể kết nối tới Master Server tại http://192.168.2.2:5274");
                 Console.WriteLine($"[NODE SERVER] Chi tiết lỗi: {ex.Message}");
                 Console.ResetColor();
             }

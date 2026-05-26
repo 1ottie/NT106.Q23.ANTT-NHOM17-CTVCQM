@@ -30,5 +30,8 @@ namespace DrawClient
         public string username { get; set; }
         public string content { get; set; }
         public DateTime timestamp { get; set; }
+
+        // UNDO/REDO - ID of the specific action being undone/redone
+        public string actionId { get; set; }
     }
 }

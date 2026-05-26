@@ -32,8 +32,8 @@ namespace DrawClient.ViewModels
         public LoginViewModel()
         {
             ConnectCommand = new RelayCommand(async (obj) => await ExecuteConnect());
-            ServerIp = "127.0.0.1";
-            Port = "5000";
+            ServerIp = "192.168.2.2";
+            Port = "5274";
 
             // Đặt UI cũng hiển thị mặc định tên bạn
             Username = "tula";
@@ -53,7 +53,7 @@ namespace DrawClient.ViewModels
                 string json = JsonSerializer.Serialize(loginReq);
                 var content = new StringContent(json, Encoding.UTF8, "application/json");
 
-                var response = await _httpClient.PostAsync("http://localhost:5274/api/auth/login", content);
+                var response = await _httpClient.PostAsync($"http://{ServerIp}:{Port}/api/auth/login", content);
                 string responseJson = await response.Content.ReadAsStringAsync();
 
                 if (!response.IsSuccessStatusCode)
