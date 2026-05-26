@@ -14,7 +14,7 @@ namespace DrawClient.Views
         private static readonly HttpClient httpClient = new HttpClient();
 
         // LƯU Ý: Đổi cổng 5274 thành cổng Web API của bạn
-        private readonly string ApiBaseUrl = "http://localhost:5274/api/auth";
+        private readonly string ApiBaseUrl = "http://192.168.1.44:5274/api/auth";
 
         public LoginScreen()
         {

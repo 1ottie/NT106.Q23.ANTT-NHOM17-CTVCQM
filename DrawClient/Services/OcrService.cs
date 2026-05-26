@@ -8,7 +8,7 @@ namespace DrawClient.Services
 {
     class OcrService
     {
-        private const string MY_SERVER_OCR_URL = "http://localhost:5274/api/ocr/recognize";
+        private const string MY_SERVER_OCR_URL = "http://192.168.1.44:5274/api/ocr/recognize";
 
         public static async Task<string> RecognizeTextAsync(string base64Image)
         {
