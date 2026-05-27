@@ -23,6 +23,7 @@ namespace DrawClient.Models
         public DateTime Timestamp { get; set; }
         public string RoomId { get; set; }
         public bool IsUndone { get; set; } = false;
+        public string StrokeGroupId { get; set; }
 
         public DrawAction()
         {

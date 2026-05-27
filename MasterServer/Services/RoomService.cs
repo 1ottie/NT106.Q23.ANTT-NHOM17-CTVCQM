@@ -29,11 +29,11 @@ public class RoomService
     {
         using var conn = _db.GetConnection();
 
-        // 1. Kiểm tra node hợp lệ
+        // 1. Tự tìm node active thay vì tin vào node_id từ client
         var node = conn.QueryFirstOrDefault<Node>(@"
-            SELECT * FROM Nodes 
-            WHERE node_id = @id AND status = 'ACTIVE'",
-            new { id = req.node_id });
+            SELECT * FROM Nodes
+            WHERE status = 'ACTIVE'
+            LIMIT 1");
 
         if (node == null)
             throw new Exception("Node not available");
@@ -59,7 +59,7 @@ public class RoomService
                 @private = req.is_private,
                 pass = hash,
                 owner = userId,
-                node = req.node_id,
+                node = node.node_id,
                 max = req.max_users
             });
 
@@ -100,13 +100,21 @@ public class RoomService
 
         if (room.is_private)
         {
-            if (string.IsNullOrEmpty(req.password) || !BCrypt.Net.BCrypt.Verify(req.password, room.password_hash))
+            if (string.IsNullOrEmpty(req.password) || string.IsNullOrEmpty(room.password_hash) || !BCrypt.Net.BCrypt.Verify(req.password, room.password_hash))
                 throw new Exception("Sai mật khẩu");
         }
 
-        var node = conn.QueryFirstOrDefault<Node>("SELECT * FROM Nodes WHERE node_id = @id", new { id = room.node_id });
+        // Tìm node của phòng, fallback sang node active bất kỳ nếu không còn
+        var node = conn.QueryFirstOrDefault<Node>(
+            "SELECT * FROM Nodes WHERE node_id = @id AND status = 'ACTIVE'",
+            new { id = room.node_id });
+
         if (node == null)
-            throw new Exception("Node xử lý phòng này không hoạt động");
+            node = conn.QueryFirstOrDefault<Node>(
+                "SELECT * FROM Nodes WHERE status = 'ACTIVE' LIMIT 1");
+
+        if (node == null)
+            throw new Exception("Không có máy chủ vẽ nào đang hoạt động");
 
         var member = conn.QueryFirstOrDefault<RoomMember>("SELECT * FROM RoomMembers WHERE room_id = @room AND user_id = @user", new { room = req.room_id, user = userId });
 
@@ -151,7 +159,7 @@ public class RoomService
         SELECT r.*, n.ip_address, n.port,
         (SELECT COUNT(*) FROM RoomMembers rm WHERE rm.room_id = r.room_id AND rm.is_online = 1) as player_count
         FROM Rooms r
-        JOIN Nodes n ON r.node_id = n.node_id
+        LEFT JOIN Nodes n ON r.node_id = n.node_id
         ORDER BY r.created_at DESC").ToList();
 
         return rooms.Select(r => new

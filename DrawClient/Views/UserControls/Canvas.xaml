@@ -276,8 +276,7 @@
     <Grid>
 
         <Grid.ColumnDefinitions>
-            <ColumnDefinition Width="Auto" MinWidth="1200"/>
-            <ColumnDefinition Width="0*"/>
+            <ColumnDefinition Width="*"/>
         </Grid.ColumnDefinitions>
 
         <Grid.RowDefinitions>
@@ -654,11 +653,11 @@
 
                 <InkCanvas x:Name="MyCanvas"
                            Grid.Column="0"
-                           EditingMode="{Binding CurrentEditingMode}" 
+                           EditingMode="{Binding CurrentEditingMode}"
                            SnapsToDevicePixels="True"
                            MouseDown="Canvas_MouseDown"
                            MouseUp="Canvas_MouseUp"
-                           MouseMove="Canvas_MouseMove" Margin="0,0,-592,0">
+                           MouseMove="Canvas_MouseMove">
 
 
                     <Ellipse x:Name="EraserCursor" 
@@ -878,7 +877,7 @@
                                     <ItemsControl ItemsSource="{Binding Toolbar.RecentColors}">
                                         <ItemsControl.ItemsPanel>
                                             <ItemsPanelTemplate>
-                                                <StackPanel Orientation="Horizontal"/>
+                                                <WrapPanel/>
                                             </ItemsPanelTemplate>
                                         </ItemsControl.ItemsPanel>
                                         <ItemsControl.ItemTemplate>
@@ -1100,50 +1099,46 @@
                                     </RadioButton>
                                 </StackPanel>
 
-                                <Grid>
-                                    <WrapPanel Margin="0,8,0,0" MaxWidth="210">
-                                        <TextBlock Text="STROKE COLOR" FontSize="12" FontWeight="Medium" Foreground="#5F6368" Margin="0,0,0,8" />
+                                <TextBlock Text="STROKE COLOR" FontSize="12" FontWeight="Medium" Foreground="#5F6368" Margin="0,8,0,0"/>
 
-                                        <StackPanel Orientation="Horizontal" Margin="0,0,0,0">
-                                            <RadioButton Style="{StaticResource ColorRadioStyle}" Background="#000000" GroupName="ShapeColors" Command="{Binding Toolbar.ChangeShapeColorCommand}" CommandParameter="#000000" IsChecked="True"/>
-                                            <RadioButton Style="{StaticResource ColorRadioStyle}" Background="#22C55E" GroupName="ShapeColors" Command="{Binding Toolbar.ChangeShapeColorCommand}" CommandParameter="#22C55E"/>
-                                            <RadioButton Style="{StaticResource ColorRadioStyle}" Background="#3B82F6" GroupName="ShapeColors" Command="{Binding Toolbar.ChangeShapeColorCommand}" CommandParameter="#3B82F6"/>
-                                            <RadioButton Style="{StaticResource ColorRadioStyle}" Background="#EF4444" GroupName="ShapeColors" Command="{Binding Toolbar.ChangeShapeColorCommand}" CommandParameter="#EF4444"/>
+                                <WrapPanel Margin="0,8,0,0" MaxWidth="210">
+                                    <RadioButton Style="{StaticResource ColorRadioStyle}" Background="#000000" GroupName="ShapeColors" Command="{Binding Toolbar.ChangeShapeColorCommand}" CommandParameter="#000000" IsChecked="True"/>
+                                    <RadioButton Style="{StaticResource ColorRadioStyle}" Background="#22C55E" GroupName="ShapeColors" Command="{Binding Toolbar.ChangeShapeColorCommand}" CommandParameter="#22C55E"/>
+                                    <RadioButton Style="{StaticResource ColorRadioStyle}" Background="#3B82F6" GroupName="ShapeColors" Command="{Binding Toolbar.ChangeShapeColorCommand}" CommandParameter="#3B82F6"/>
+                                    <RadioButton Style="{StaticResource ColorRadioStyle}" Background="#EF4444" GroupName="ShapeColors" Command="{Binding Toolbar.ChangeShapeColorCommand}" CommandParameter="#EF4444"/>
 
-                                            <ItemsControl ItemsSource="{Binding Toolbar.RecentColors}">
-                                                <ItemsControl.ItemsPanel>
-                                                    <ItemsPanelTemplate>
-                                                        <StackPanel Orientation="Horizontal"/>
-                                                    </ItemsPanelTemplate>
-                                                </ItemsControl.ItemsPanel>
-                                                <ItemsControl.ItemTemplate>
-                                                    <DataTemplate>
-                                                        <RadioButton Style="{StaticResource ColorRadioStyle}" 
-                                                         Background="{Binding Converter={StaticResource HexToBrushConverter}}" 
-                                                         GroupName="ShapeColors" 
-                                                         Command="{Binding DataContext.Toolbar.ChangeShapeColorCommand, RelativeSource={RelativeSource AncestorType=ItemsControl}}" 
-                                                         CommandParameter="{Binding}"/>
-                                                    </DataTemplate>
-                                                </ItemsControl.ItemTemplate>
-                                            </ItemsControl>
+                                    <ItemsControl ItemsSource="{Binding Toolbar.RecentColors}">
+                                        <ItemsControl.ItemsPanel>
+                                            <ItemsPanelTemplate>
+                                                <WrapPanel/>
+                                            </ItemsPanelTemplate>
+                                        </ItemsControl.ItemsPanel>
+                                        <ItemsControl.ItemTemplate>
+                                            <DataTemplate>
+                                                <RadioButton Style="{StaticResource ColorRadioStyle}"
+                                                             Background="{Binding Converter={StaticResource HexToBrushConverter}}"
+                                                             GroupName="ShapeColors"
+                                                             Command="{Binding DataContext.Toolbar.ChangeShapeColorCommand, RelativeSource={RelativeSource AncestorType=ItemsControl}}"
+                                                             CommandParameter="{Binding}"/>
+                                            </DataTemplate>
+                                        </ItemsControl.ItemTemplate>
+                                    </ItemsControl>
 
-                                            <Button Width="32" Height="32" Background="Transparent" BorderBrush="#D1D5DB" BorderThickness="1" Cursor="Hand" Click="OpenColorPicker_Click" ToolTip="Add Custom Color">
-                                                <Button.Template>
-                                                    <ControlTemplate TargetType="Button">
-                                                        <Border CornerRadius="16" BorderBrush="{TemplateBinding BorderBrush}" BorderThickness="{TemplateBinding BorderThickness}" Background="{TemplateBinding Background}">
-                                                            <TextBlock Text="+" FontSize="20" HorizontalAlignment="Center" VerticalAlignment="Center" Foreground="#6B7280" Margin="0,-5,0,0"/>
-                                                        </Border>
-                                                        <ControlTemplate.Triggers>
-                                                            <Trigger Property="IsMouseOver" Value="True">
-                                                                <Setter Property="Background" Value="#F3F4F6"/>
-                                                            </Trigger>
-                                                        </ControlTemplate.Triggers>
-                                                    </ControlTemplate>
-                                                </Button.Template>
-                                            </Button>
-                                        </StackPanel>
-                                    </WrapPanel>
-                                </Grid>
+                                    <Button Width="32" Height="32" Background="Transparent" BorderBrush="#D1D5DB" BorderThickness="1" Cursor="Hand" Click="OpenColorPicker_Click" ToolTip="Add Custom Color">
+                                        <Button.Template>
+                                            <ControlTemplate TargetType="Button">
+                                                <Border CornerRadius="16" BorderBrush="{TemplateBinding BorderBrush}" BorderThickness="{TemplateBinding BorderThickness}" Background="{TemplateBinding Background}">
+                                                    <TextBlock Text="+" FontSize="20" HorizontalAlignment="Center" VerticalAlignment="Center" Foreground="#6B7280" Margin="0,-5,0,0"/>
+                                                </Border>
+                                                <ControlTemplate.Triggers>
+                                                    <Trigger Property="IsMouseOver" Value="True">
+                                                        <Setter Property="Background" Value="#F3F4F6"/>
+                                                    </Trigger>
+                                                </ControlTemplate.Triggers>
+                                            </ControlTemplate>
+                                        </Button.Template>
+                                    </Button>
+                                </WrapPanel>
 
                             </StackPanel>
                         </Border>

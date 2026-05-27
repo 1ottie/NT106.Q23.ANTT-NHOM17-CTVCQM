@@ -18,7 +18,7 @@ namespace DrawClient.Views
             var vm = this.DataContext as LoginViewModel;
             if (vm != null)
                 return $"http://{vm.ServerIp}:{vm.Port}/api/auth";
-            return "http://192.168.2.2:5274/api/auth";
+            return $"http://{LoginViewModel.CurrentMasterIp}:{LoginViewModel.CurrentMasterPort}/api/auth";
         }
 
         public LoginScreen()

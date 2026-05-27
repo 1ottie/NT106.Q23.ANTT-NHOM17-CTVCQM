@@ -189,10 +189,8 @@ namespace DrawClient.Views.UserControls
 
         private void Canvas_DataContextChanged(object sender, DependencyPropertyChangedEventArgs e)
         {
-
-            MyCanvas.SelectionMoved += MyCanvas_SelectionMoved;
-            MyCanvas.SelectionResized += MyCanvas_SelectionResized;
-            MyCanvas.SelectionChanged += MyCanvas_SelectionChanged;
+            // NOTE: SelectionMoved/Resized/Changed are already registered in the constructor.
+            // Do NOT re-register them here — that causes every event to fire twice.
             // 1. Unsubscribe VM cũ trước
             if (e.OldValue is CanvasViewModel oldVm)
             {
@@ -723,7 +721,7 @@ namespace DrawClient.Views.UserControls
                 }
                 else
                 {
-                    if (vm.Toolbar.CurrentPenType == "Laser")
+                    if (string.Equals(vm.Toolbar.CurrentPenType, "laser", StringComparison.OrdinalIgnoreCase))
                     {
                         MyCanvas.EditingMode = InkCanvasEditingMode.None;
                     }
@@ -749,6 +747,27 @@ namespace DrawClient.Views.UserControls
             {
                 isDrawing = false;
                 isShapeDrawing = false;
+
+                // Xóa preview shape tạm thời ngay khi đổi tool (tránh ghost stroke)
+                if (_currentTempStroke != null)
+                {
+                    MyCanvas.Strokes.Remove(_currentTempStroke);
+                    _currentTempStroke = null;
+                }
+
+                // Clear laser trail immediately when switching away from pen/laser mode
+                if (e.PropertyName == nameof(CanvasViewModel.SelectedTool) &&
+                    _viewModel.SelectedTool?.ToLower() != "pen")
+                {
+                    _laserTimer.Stop();
+                    if (_currentLaserPolyline != null)
+                    {
+                        laserCanvas.Children.Remove(_currentLaserPolyline);
+                        _currentLaserPolyline = null;
+                    }
+                    laserDot.Visibility = Visibility.Collapsed;
+                }
+
                 bool isEraser = _viewModel.SelectedTool?.ToLower() == "eraser";
 
                 if (isEraser)
@@ -895,6 +914,7 @@ namespace DrawClient.Views.UserControls
                 MyCanvas.CaptureMouse();
                 UpdateEraserCursor(lastPoint);
                 if (EraserCursor != null) EraserCursor.Visibility = Visibility.Visible;
+                _viewModel.BeginStroke(); // group erase segments of this drag
                 return;
             }
 
@@ -914,6 +934,7 @@ namespace DrawClient.Views.UserControls
                 isDrawing = true;
                 lastPoint = e.GetPosition(MyCanvas);
                 MyCanvas.CaptureMouse();
+                _viewModel.BeginStroke(); // group all segments of this drag under one StrokeGroupId
             }
         }
         private void Canvas_MouseMove(object sender, MouseEventArgs e)
@@ -997,7 +1018,23 @@ namespace DrawClient.Views.UserControls
                     new Point[] { lastPoint, currentPoint },
                     new EllipseStylusShape(_viewModel.Toolbar.EraserSize, _viewModel.Toolbar.EraserSize));
 
-                // FIX: Gửi lệnh ERASE lên server (không phải DRAW)
+                // Track local erase for undo first to capture IDs for sync
+                var eraseAction = new DrawAction(
+                    "ERASE",
+                    lastPoint,
+                    currentPoint,
+                    "#ERASE",
+                    _viewModel.Toolbar.EraserSize,
+                    ClientSocket.Instance.CurrentUserId,
+                    ClientSocket.Instance.CurrentUsername,
+                    _viewModel.RoomId)
+                {
+                    StrokeGroupId = _viewModel.CurrentStrokeGroupId
+                };
+                _viewModel.UndoRedoManager.AddAction(eraseAction);
+                _viewModel.UpdateHistoryUI();
+
+                // Gửi lệnh ERASE lên server kèm actionId/strokeGroupId để undo sync
                 var eraseMsg = new DrawMessage
                 {
                     type = "ERASE",
@@ -1009,21 +1046,11 @@ namespace DrawClient.Views.UserControls
                     x2 = currentPoint.X,
                     y2 = currentPoint.Y,
                     thickness = _viewModel.Toolbar.EraserSize,
-                    color = "#ERASE"
+                    color = "#ERASE",
+                    actionId = eraseAction.Id,
+                    strokeGroupId = eraseAction.StrokeGroupId
                 };
                 ClientSocket.Instance.Send(eraseMsg);
-
-                // Track local erase for undo
-                _viewModel.UndoRedoManager.AddAction(new DrawAction(
-                    "ERASE",
-                    lastPoint,
-                    currentPoint,
-                    "#ERASE",
-                    _viewModel.Toolbar.EraserSize,
-                    ClientSocket.Instance.CurrentUserId,
-                    ClientSocket.Instance.CurrentUsername,
-                    _viewModel.RoomId));
-                _viewModel.UpdateHistoryUI();
 
                 // Gọi hàm quét chữ khi rê chuột
                 EraseTextAtPoint(currentPoint);
@@ -1074,6 +1101,7 @@ namespace DrawClient.Views.UserControls
             if (isDrawing)
             {
                 isDrawing = false;
+                _viewModel?.EndStroke(); // close the stroke group
 
                 Point endPoint = e.GetPosition(MyCanvas);
 
@@ -1088,7 +1116,19 @@ namespace DrawClient.Views.UserControls
 
                     if (isEraserClick)
                     {
-                        var eraseMsg = new DrawMessage
+                        var eraseClickAction = new DrawAction(
+                            "ERASE",
+                            endPoint,
+                            tinyMove,
+                            "#ERASE",
+                            _viewModel.Toolbar.EraserSize,
+                            ClientSocket.Instance.CurrentUserId,
+                            ClientSocket.Instance.CurrentUsername,
+                            _viewModel.RoomId);
+                        _viewModel.UndoRedoManager.AddAction(eraseClickAction);
+                        _viewModel.UpdateHistoryUI();
+
+                        ClientSocket.Instance.Send(new DrawMessage
                         {
                             type = "ERASE",
                             roomId = _viewModel.RoomId,
@@ -1099,9 +1139,10 @@ namespace DrawClient.Views.UserControls
                             x2 = tinyMove.X,
                             y2 = tinyMove.Y,
                             thickness = _viewModel.Toolbar.EraserSize,
-                            color = "#ERASE"
-                        };
-                        ClientSocket.Instance.Send(eraseMsg);
+                            color = "#ERASE",
+                            actionId = eraseClickAction.Id,
+                            strokeGroupId = eraseClickAction.StrokeGroupId
+                        });
                     }
                     else if (_viewModel.CurrentEditingMode == InkCanvasEditingMode.Ink)
                     {
@@ -1133,32 +1174,8 @@ namespace DrawClient.Views.UserControls
 
                 // XÓA PREVIEW STROKE CŨ
                 _currentTempStroke = null;
-                //vẽ local
-                // GỬI QUA SERVER
-                ClientSocket.Instance.Send(new DrawMessage
-                {
-                    type = "SHAPE",
-
-                    roomId = _viewModel.RoomId,
-
-                    userId = ClientSocket.Instance.CurrentUserId,
-
-                    username = ClientSocket.Instance.CurrentUsername,
-
-                    shapeType = penType,
-
-                    x1 = _startPoint.X,
-                    y1 = _startPoint.Y,
-
-                    x2 = endPoint.X,
-                    y2 = endPoint.Y,
-
-                    color = _viewModel.Toolbar.CurrentShapeColor,
-                    thickness = _viewModel.Toolbar.CurrentShapeThickness
-                });
-
-                // Track local shape for undo
-                _viewModel.UndoRedoManager.AddAction(new DrawAction(
+                // Track local shape for undo first to capture ID for sync
+                var shapeAction = new DrawAction(
                     "SHAPE",
                     _startPoint,
                     endPoint,
@@ -1169,8 +1186,27 @@ namespace DrawClient.Views.UserControls
                     _viewModel.RoomId)
                 {
                     ShapeType = penType
-                });
+                };
+                _viewModel.UndoRedoManager.AddAction(shapeAction);
                 _viewModel.UpdateHistoryUI();
+
+                // GỬI QUA SERVER kèm actionId để undo sync
+                ClientSocket.Instance.Send(new DrawMessage
+                {
+                    type = "SHAPE",
+                    roomId = _viewModel.RoomId,
+                    userId = ClientSocket.Instance.CurrentUserId,
+                    username = ClientSocket.Instance.CurrentUsername,
+                    shapeType = penType,
+                    x1 = _startPoint.X,
+                    y1 = _startPoint.Y,
+                    x2 = endPoint.X,
+                    y2 = endPoint.Y,
+                    color = _viewModel.Toolbar.CurrentShapeColor,
+                    thickness = _viewModel.Toolbar.CurrentShapeThickness,
+                    actionId = shapeAction.Id,
+                    strokeGroupId = shapeAction.StrokeGroupId
+                });
 
                 isShapeDrawing = false;
 
@@ -1267,6 +1303,10 @@ namespace DrawClient.Views.UserControls
         private void InkCanvas_MouseMove(object sender, MouseEventArgs e)
         {
             if (_viewModel?.Toolbar?.CurrentPenType?.ToLower() != "laser")
+                return;
+
+            // Only render laser when the pen tool is active (not select, eraser, shape, etc.)
+            if (_viewModel?.SelectedTool?.ToLowerInvariant() != "pen")
                 return;
 
             Point p = e.GetPosition(laserCanvas);
@@ -1941,77 +1981,62 @@ namespace DrawClient.Views.UserControls
 
         private void HandleRemoteSelectionTransform(string json)
         {
-            Application.Current.Dispatcher.Invoke(() =>
+            // Always called from UI thread (via InvokeUI or Dispatcher.Invoke at the call site)
+            try
             {
-                try
+                using (var doc = System.Text.Json.JsonDocument.Parse(json))
                 {
-                    using (var doc = System.Text.Json.JsonDocument.Parse(json))
+                    var root = doc.RootElement;
+
+                    if (!root.TryGetProperty("text", out var textEl) || string.IsNullOrEmpty(textEl.GetString()))
+                        return;
+
+                    string transformData = textEl.GetString();
+                    var parts = transformData.Split('|');
+                    if (parts.Length != 3) return;
+
+                    var oldB = parts[1].Split(',').Select(s => double.Parse(s, System.Globalization.CultureInfo.InvariantCulture)).ToArray();
+                    var newB = parts[2].Split(',').Select(s => double.Parse(s, System.Globalization.CultureInfo.InvariantCulture)).ToArray();
+
+                    Rect oldBounds = new Rect(oldB[0], oldB[1], oldB[2], oldB[3]);
+                    Rect newBounds = new Rect(newB[0], newB[1], newB[2], newB[3]);
+
+                    double scaleX = oldBounds.Width > 0 ? newBounds.Width / oldBounds.Width : 1;
+                    double scaleY = oldBounds.Height > 0 ? newBounds.Height / oldBounds.Height : 1;
+                    double offsetX = newBounds.X - (oldBounds.X * scaleX);
+                    double offsetY = newBounds.Y - (oldBounds.Y * scaleY);
+
+                    var matrix = new Matrix();
+                    matrix.Scale(scaleX, scaleY);
+                    matrix.Translate(offsetX, offsetY);
+
+                    StrokeCollection strokesToTransform = new StrokeCollection();
+
+                    // Luôn dùng index: Pass 1 tái tạo đúng thứ tự UNDO/REDO nên index vẫn hợp lệ
+                    // khi replay history cũng như khi nhận tin nhắn live
+                    var indices = parts[0].Split(',').Select(int.Parse).ToList();
+                    foreach (int idx in indices)
                     {
-                        var root = doc.RootElement;
+                        if (idx >= 0 && idx < MyCanvas.Strokes.Count)
+                            strokesToTransform.Add(MyCanvas.Strokes[idx]);
+                    }
 
-                        // Xử lý chuẩn mới: "text" chứa chuỗi "indices|oldBounds|newBounds"
-                        if (root.TryGetProperty("text", out var textEl) && !string.IsNullOrEmpty(textEl.GetString()))
-                        {
-                            string transformData = textEl.GetString();
-                            var parts = transformData.Split('|');
+                    if (strokesToTransform.Count > 0)
+                    {
+                        MyCanvas.SelectionMoved -= MyCanvas_SelectionMoved;
+                        MyCanvas.SelectionResized -= MyCanvas_SelectionResized;
 
-                            if (parts.Length == 3)
-                            {
-                                // Lấy mảng index các nét vẽ bị thay đổi
-                                var indices = parts[0].Split(',').Select(int.Parse).ToList();
+                        strokesToTransform.Transform(matrix, false);
 
-                                // Lấy tọa độ hộp cũ và hộp mới (Ép kiểu InvariantCulture để tránh lỗi dấu chấm/phẩy)
-                                var oldB = parts[1].Split(',').Select(s => double.Parse(s, System.Globalization.CultureInfo.InvariantCulture)).ToArray();
-                                var newB = parts[2].Split(',').Select(s => double.Parse(s, System.Globalization.CultureInfo.InvariantCulture)).ToArray();
-
-                                Rect oldBounds = new Rect(oldB[0], oldB[1], oldB[2], oldB[3]);
-                                Rect newBounds = new Rect(newB[0], newB[1], newB[2], newB[3]);
-
-                                // Tính toán tỉ lệ Scale và khoảng dịch chuyển Translate
-                                double scaleX = oldBounds.Width > 0 ? newBounds.Width / oldBounds.Width : 1;
-                                double scaleY = oldBounds.Height > 0 ? newBounds.Height / oldBounds.Height : 1;
-
-                                double offsetX = newBounds.X - (oldBounds.X * scaleX);
-                                double offsetY = newBounds.Y - (oldBounds.Y * scaleY);
-
-                                // Thiết lập ma trận biến đổi
-                                var matrix = new Matrix();
-                                matrix.Scale(scaleX, scaleY);
-                                matrix.Translate(offsetX, offsetY);
-
-                                // Tìm chính xác các nét vẽ theo Index để áp dụng thay đổi
-                                StrokeCollection strokesToTransform = new StrokeCollection();
-                                foreach (int idx in indices)
-                                {
-                                    if (idx >= 0 && idx < MyCanvas.Strokes.Count)
-                                    {
-                                        strokesToTransform.Add(MyCanvas.Strokes[idx]);
-                                    }
-                                }
-
-                                if (strokesToTransform.Count > 0)
-                                {
-                                    // TẠM THỜI TẮT EVENT để canvas không hiểu nhầm máy nhận đang tự kéo chuột
-                                    // và gửi ngược lại dữ liệu lên server gây vòng lặp vô hạn (Infinite Loop)
-                                    MyCanvas.SelectionMoved -= MyCanvas_SelectionMoved;
-                                    MyCanvas.SelectionResized -= MyCanvas_SelectionResized;
-
-                                    // Áp dụng ma trận biến đổi
-                                    strokesToTransform.Transform(matrix, false);
-
-                                    // Bật lại event
-                                    MyCanvas.SelectionMoved += MyCanvas_SelectionMoved;
-                                    MyCanvas.SelectionResized += MyCanvas_SelectionResized;
-                                }
-                            }
-                        }
+                        MyCanvas.SelectionMoved += MyCanvas_SelectionMoved;
+                        MyCanvas.SelectionResized += MyCanvas_SelectionResized;
                     }
                 }
-                catch (Exception ex)
-                {
-                    Console.WriteLine("Lỗi đồng bộ dịch chuyển vùng chọn: " + ex.Message);
-                }
-            });
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine("Lỗi đồng bộ dịch chuyển vùng chọn: " + ex.Message);
+            }
         }
     }
 

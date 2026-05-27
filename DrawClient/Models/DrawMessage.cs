@@ -33,5 +33,8 @@ namespace DrawClient
 
         // UNDO/REDO - ID of the specific action being undone/redone
         public string actionId { get; set; }
+
+        // Groups all segments of one mouse-drag into a single logical stroke for undo/redo
+        public string strokeGroupId { get; set; }
     }
 }

@@ -3,12 +3,13 @@ using System.Net.Http;
 using System.Text;
 using System.Text.Json;
 using System.Threading.Tasks;
+using DrawClient.ViewModels;
 
 namespace DrawClient.Services
 {
     class OcrService
     {
-        private const string MY_SERVER_OCR_URL = "http://localhost:5274/api/ocr/recognize";
+        private static string MY_SERVER_OCR_URL => $"http://{LoginViewModel.CurrentMasterIp}:{LoginViewModel.CurrentMasterPort}/api/ocr/recognize";
 
         public static async Task<string> RecognizeTextAsync(string base64Image)
         {

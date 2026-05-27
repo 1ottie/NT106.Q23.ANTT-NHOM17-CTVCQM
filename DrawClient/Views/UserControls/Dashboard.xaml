@@ -56,9 +56,21 @@
                     </Grid>
                 </Border>
 
-                <Border Grid.Column="2" Width="32" Height="32" Background="#1A73E8" CornerRadius="16">
-                    <TextBlock Text="{Binding CurrentUserInitials}" Foreground="White" FontSize="14" FontWeight="Medium" HorizontalAlignment="Center" VerticalAlignment="Center"/>
-                </Border>
+                <Button x:Name="ProfileButton" Grid.Column="2"
+                        Command="{Binding ToggleProfilePopoverCommand}"
+                        Width="32" Height="32"
+                        Background="Transparent" BorderThickness="0"
+                        Cursor="Hand" FocusVisualStyle="{x:Null}">
+                    <Button.Template>
+                        <ControlTemplate TargetType="Button">
+                            <Border Width="32" Height="32" Background="#1A73E8" CornerRadius="16">
+                                <TextBlock Text="{Binding CurrentUserInitials}"
+                                           Foreground="White" FontSize="14" FontWeight="Medium"
+                                           HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                            </Border>
+                        </ControlTemplate>
+                    </Button.Template>
+                </Button>
             </Grid>
         </Border>
 
@@ -70,19 +82,49 @@
 
             <ScrollViewer Grid.Column="0" Padding="32" VerticalScrollBarVisibility="Auto">
                 <StackPanel>
-                    <!-- 2 khối tạo phòng và tham gia phòng -->
+                    <!-- Action buttons + collapsible panels -->
                     <Grid Margin="0,0,0,24">
                         <Grid.ColumnDefinitions>
                             <ColumnDefinition Width="*"/>
                             <ColumnDefinition Width="24"/>
                             <ColumnDefinition Width="*"/>
                         </Grid.ColumnDefinitions>
+                        <Grid.RowDefinitions>
+                            <RowDefinition Height="Auto"/>
+                            <RowDefinition Height="Auto"/>
+                        </Grid.RowDefinitions>
 
-                        <!-- KHU VỰC TẠO PHÒNG MỚI -->
-                        <Border Grid.Column="0" Background="#FFFFFF" BorderBrush="#DADCE0" BorderThickness="1" CornerRadius="8" Padding="20">
+                        <!-- CREATE ROOM TOGGLE BUTTON -->
+                        <Button Grid.Row="0" Grid.Column="0"
+                                Content="+ Create New Room"
+                                Command="{Binding ToggleCreateRoomCommand}"
+                                Background="#1A73E8" Foreground="White"
+                                FontSize="14" FontWeight="Medium" Height="40" BorderThickness="0">
+                            <Button.Resources>
+                                <Style TargetType="Border">
+                                    <Setter Property="CornerRadius" Value="4"/>
+                                </Style>
+                            </Button.Resources>
+                        </Button>
+
+                        <!-- JOIN ROOM TOGGLE BUTTON -->
+                        <Button Grid.Row="0" Grid.Column="2"
+                                Content="Join Room via ID"
+                                Command="{Binding ToggleJoinRoomCommand}"
+                                Background="#34A853" Foreground="White"
+                                FontSize="14" FontWeight="Medium" Height="40" BorderThickness="0">
+                            <Button.Resources>
+                                <Style TargetType="Border">
+                                    <Setter Property="CornerRadius" Value="4"/>
+                                </Style>
+                            </Button.Resources>
+                        </Button>
+
+                        <!-- CREATE ROOM FORM (collapsible) -->
+                        <Border Grid.Row="1" Grid.Column="0" Margin="0,8,0,0"
+                                Visibility="{Binding IsCreateRoomVisible, Converter={StaticResource BoolToVis}}"
+                                Background="#FFFFFF" BorderBrush="#DADCE0" BorderThickness="1" CornerRadius="8" Padding="20">
                             <StackPanel>
-                                <TextBlock Text="Create New Room" FontSize="16" FontWeight="Medium" Foreground="#202124" Margin="0,0,0,16"/>
-
                                 <TextBlock Text="Room Name" Foreground="#5F6368" FontSize="12" Margin="0,0,0,4"/>
                                 <TextBox Text="{Binding NewRoomName, UpdateSourceTrigger=PropertyChanged}" Height="36" Padding="8,0" BorderBrush="#DADCE0" VerticalContentAlignment="Center" Margin="0,0,0,12"/>
 
@@ -91,8 +133,8 @@
 
                                 <CheckBox Content="Private Room" IsChecked="{Binding NewRoomIsPrivate}" Foreground="#5F6368" Margin="0,0,0,16"/>
 
-                                <Button Content="Create Room" Command="{Binding CreateRoomCommand}" 
-                    Background="#1A73E8" Foreground="White" FontSize="14" FontWeight="Medium" Height="36" BorderThickness="0">
+                                <Button Content="Create Room" Command="{Binding CreateRoomCommand}"
+                                        Background="#1A73E8" Foreground="White" FontSize="14" FontWeight="Medium" Height="36" BorderThickness="0">
                                     <Button.Resources>
                                         <Style TargetType="Border">
                                             <Setter Property="CornerRadius" Value="4"/>
@@ -102,20 +144,19 @@
                             </StackPanel>
                         </Border>
 
-                        <!-- KHU VỰC VÀO PHÒNG BẰNG ID & MẬT KHẨU -->
-                        <Border Grid.Column="2" Background="#FFFFFF" BorderBrush="#DADCE0" BorderThickness="1" CornerRadius="8" Padding="20">
+                        <!-- JOIN ROOM FORM (collapsible) -->
+                        <Border Grid.Row="1" Grid.Column="2" Margin="0,8,0,0"
+                                Visibility="{Binding IsJoinRoomVisible, Converter={StaticResource BoolToVis}}"
+                                Background="#FFFFFF" BorderBrush="#DADCE0" BorderThickness="1" CornerRadius="8" Padding="20">
                             <StackPanel>
-                                <TextBlock Text="Join Room via ID" FontSize="16" FontWeight="Medium" Foreground="#202124" Margin="0,0,0,16"/>
-
                                 <TextBlock Text="Room ID" Foreground="#5F6368" FontSize="12" Margin="0,0,0,4"/>
                                 <TextBox Text="{Binding JoinRoomIdStr, UpdateSourceTrigger=PropertyChanged}" Height="36" Padding="8,0" BorderBrush="#DADCE0" VerticalContentAlignment="Center" Margin="0,0,0,12"/>
 
                                 <TextBlock Text="Password" Foreground="#5F6368" FontSize="12" Margin="0,0,0,4"/>
-                                <TextBox Text="{Binding JoinRoomPassword, UpdateSourceTrigger=PropertyChanged}" Height="36" Padding="8,0" BorderBrush="#DADCE0" VerticalContentAlignment="Center" Margin="0,0,0,33"/>
-                                <!-- Margin 33 để căn ngang với ô Create -->
+                                <TextBox Text="{Binding JoinRoomPassword, UpdateSourceTrigger=PropertyChanged}" Height="36" Padding="8,0" BorderBrush="#DADCE0" VerticalContentAlignment="Center" Margin="0,0,0,16"/>
 
-                                <Button Content="Join Room" Command="{Binding JoinManualCommand}" 
-                    Background="#34A853" Foreground="White" FontSize="14" FontWeight="Medium" Height="36" BorderThickness="0">
+                                <Button Content="Join Room" Command="{Binding JoinManualCommand}"
+                                        Background="#34A853" Foreground="White" FontSize="14" FontWeight="Medium" Height="36" BorderThickness="0">
                                     <Button.Resources>
                                         <Style TargetType="Border">
                                             <Setter Property="CornerRadius" Value="4"/>
@@ -125,7 +166,6 @@
                             </StackPanel>
                         </Border>
                     </Grid>
-                    <!-- KẾT THÚC PHẦN THAY THẾ -->
 
                     <TextBlock Text="ACTIVE ROOMS" FontSize="14" FontWeight="Medium" Foreground="#5F6368" Margin="0,0,0,16"/>
 
@@ -196,43 +236,76 @@
         <!-- ================= POPOVER PROFILE / LOG OUT ================= -->
         <Border x:Name="ProfilePopover"
                 Background="#FFFFFF" CornerRadius="8" MinWidth="160"
-                HorizontalAlignment="Right" VerticalAlignment="Top" 
+                HorizontalAlignment="Right" VerticalAlignment="Top"
                 Margin="0,52,24,0" Padding="0"
-            Panel.ZIndex="1000"
+                Panel.ZIndex="1000"
                 Visibility="{Binding IsProfilePopoverVisible, Converter={StaticResource BoolToVis}}"
-                d:Visibility="Visible" Grid.RowSpan="2" Height="50" Width="180">
+                d:Visibility="Visible" Grid.RowSpan="2" Width="200">
 
             <Border.Effect>
                 <DropShadowEffect BlurRadius="8" ShadowDepth="2" Opacity="0.15" Color="#3C4043"/>
             </Border.Effect>
 
             <StackPanel>
-                <Button Command="{Binding LogoutCommand}" Background="Transparent" BorderThickness="0" Cursor="Hand" HorizontalContentAlignment="Stretch" Height="50">
+                <!-- Account manager -->
+                <Button Command="{Binding AccountManagerCommand}" Background="Transparent" BorderThickness="0" Cursor="Hand" HorizontalContentAlignment="Stretch" Height="50">
                     <Button.Template>
                         <ControlTemplate TargetType="Button">
-                            <Border x:Name="bgBorder" Background="{TemplateBinding Background}" Padding="16,12" CornerRadius="8" SnapsToDevicePixels="True">
+                            <Border x:Name="bgBorder1" Background="{TemplateBinding Background}" Padding="16,12" CornerRadius="8,8,0,0" SnapsToDevicePixels="True">
                                 <Grid>
                                     <Grid.ColumnDefinitions>
                                         <ColumnDefinition Width="36"/>
                                         <ColumnDefinition Width="*"/>
                                     </Grid.ColumnDefinitions>
 
-                                    <Path Grid.Column="0" 
-                                          Data="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4 M16 17l5-5-5-5 M21 12H9" 
-                                          Stroke="#5F6368" StrokeThickness="1.5" 
+                                    <Path Grid.Column="0"
+                                          Data="M12 12a5 5 0 1 0 0-10 5 5 0 0 0 0 10z M4 22a8 8 0 0 1 16 0"
+                                          Stroke="#5F6368" StrokeThickness="1.5"
                                           StrokeStartLineCap="Round" StrokeEndLineCap="Round" StrokeLineJoin="Round"
-                                          Fill="Transparent" 
+                                          Fill="Transparent"
                                           Width="18" Height="18" Stretch="Uniform" Margin="9,4,9,4"/>
 
-                                    <TextBlock Grid.Column="1" 
-                                               Text="Log out" 
-                                               FontSize="14" 
-                                               FontWeight="Regular"
+                                    <TextBlock Grid.Column="1"
+                                               Text="Account manager"
+                                               FontSize="14"
                                                Foreground="#202124" Margin="10,0,0,0"
                                                VerticalAlignment="Center"/>
                                 </Grid>
                             </Border>
+                            <ControlTemplate.Triggers>
+                                <Trigger Property="IsMouseOver" Value="True">
+                                    <Setter TargetName="bgBorder1" Property="Background" Value="#F8F9FA"/>
+                                </Trigger>
+                            </ControlTemplate.Triggers>
+                        </ControlTemplate>
+                    </Button.Template>
+                </Button>
 
+                <!-- Log out -->
+                <Button Command="{Binding LogoutCommand}" Background="Transparent" BorderThickness="0" Cursor="Hand" HorizontalContentAlignment="Stretch" Height="50">
+                    <Button.Template>
+                        <ControlTemplate TargetType="Button">
+                            <Border x:Name="bgBorder" Background="{TemplateBinding Background}" Padding="16,12" CornerRadius="0,0,8,8" SnapsToDevicePixels="True">
+                                <Grid>
+                                    <Grid.ColumnDefinitions>
+                                        <ColumnDefinition Width="36"/>
+                                        <ColumnDefinition Width="*"/>
+                                    </Grid.ColumnDefinitions>
+
+                                    <Path Grid.Column="0"
+                                          Data="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4 M16 17l5-5-5-5 M21 12H9"
+                                          Stroke="#5F6368" StrokeThickness="1.5"
+                                          StrokeStartLineCap="Round" StrokeEndLineCap="Round" StrokeLineJoin="Round"
+                                          Fill="Transparent"
+                                          Width="18" Height="18" Stretch="Uniform" Margin="9,4,9,4"/>
+
+                                    <TextBlock Grid.Column="1"
+                                               Text="Log out"
+                                               FontSize="14"
+                                               Foreground="#202124" Margin="10,0,0,0"
+                                               VerticalAlignment="Center"/>
+                                </Grid>
+                            </Border>
                             <ControlTemplate.Triggers>
                                 <Trigger Property="IsMouseOver" Value="True">
                                     <Setter TargetName="bgBorder" Property="Background" Value="#F8F9FA"/>

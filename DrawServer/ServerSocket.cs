@@ -15,8 +15,7 @@ namespace DrawServer
 {
     public class ServerSocket
     {
-        private string connectionString =
-            "server=192.168.2.2;database=online_Drawing_DB;user=root;password=182806";
+        private string connectionString = AppConfig.DbConnectionString;
 
         private TcpListener server;
 
@@ -33,7 +32,7 @@ namespace DrawServer
         
         private bool _isRunning = true;
         private static readonly HttpClient _httpClient = new HttpClient();
-        private const string MasterApiUrl = "http://192.168.2.2:5274/api/room/update-status";
+        private static readonly string MasterApiUrl = $"http://{AppConfig.MasterServerIp}:{AppConfig.MasterServerPort}/api/room/update-status";
 
         public void Start(int port)
         {
@@ -127,9 +126,8 @@ namespace DrawServer
                     }
                 }
 
-                catch (Exception ex)
+                catch (Exception)
                 {
-                    
                 }
                 finally
                 {
@@ -214,6 +212,13 @@ namespace DrawServer
                 {
                     // Phân loại phòng: Lấy danh sách client của phòng này, hoặc tạo mới nếu phòng chưa tồn tại
                     var room = rooms.GetOrAdd(msg.roomId, _ => new ConcurrentDictionary<TcpClient, byte>());
+
+                    // Lưu metadata ngay lập tức để các tin nhắn tiếp theo (DRAW, UNDO...) có thể truy cập
+                    clientMetadata[client] = (msg.userId, msg.roomId, msg.username);
+
+                    // Thêm client vào phòng NGAY LẬP TỨC để không bỏ lỡ broadcast trong thời gian chờ
+                    room[client] = 0;
+
                     // Gửi thông tin của những người ĐANG Ở SẴN trong phòng cho thành viên MỚI VÀO
                     // DÙNG TASK CHỜ 500MS ĐỂ GIAO DIỆN CLIENT KỊP LOAD XONG
                     Task.Run(async () =>
@@ -235,11 +240,6 @@ namespace DrawServer
                                 SendPacketToClient(client, JsonSerializer.Serialize(existingUserMsg));
                             }
                         }
-
-                        room[client] = 0; // Thêm client vào phòng
-                                          // Lưu lại Metadata để xử lý khi thoát
-                                          // Lưu ý: Client cần gửi kèm userId trong gói tin JOIN
-                        clientMetadata[client] = (msg.userId, msg.roomId, msg.username);
                         using (var conn = new MySqlConnection(connectionString))
                         {
                             conn.Open();
@@ -332,27 +332,29 @@ namespace DrawServer
 
                 else if (msg.type == "UNDO")
                 {
-                    if (clientMetadata.TryGetValue(client, out var metadata))
+                    if (!clientMetadata.TryGetValue(client, out var metadata))
                     {
-                        msg.userId = metadata.UserId;
-                        msg.username = metadata.Username;
+                        Console.WriteLine("[NODE - WARN] UNDO từ client chưa có metadata, bỏ qua.");
+                        return false;
                     }
+                    msg.userId = metadata.UserId;
+                    msg.username = metadata.Username;
 
                     SaveDrawAction(msg);
-                    string undoJson = JsonSerializer.Serialize(msg);
-                    BroadcastToRoom(msg.roomId, undoJson, client);
+                    BroadcastToRoom(msg.roomId, JsonSerializer.Serialize(msg), client);
                 }
                 else if (msg.type == "REDO")
                 {
-                    if (clientMetadata.TryGetValue(client, out var metadata))
+                    if (!clientMetadata.TryGetValue(client, out var metadata))
                     {
-                        msg.userId = metadata.UserId;
-                        msg.username = metadata.Username;
+                        Console.WriteLine("[NODE - WARN] REDO từ client chưa có metadata, bỏ qua.");
+                        return false;
                     }
+                    msg.userId = metadata.UserId;
+                    msg.username = metadata.Username;
 
                     SaveDrawAction(msg);
-                    string redoJson = JsonSerializer.Serialize(msg);
-                    BroadcastToRoom(msg.roomId, redoJson, client);
+                    BroadcastToRoom(msg.roomId, JsonSerializer.Serialize(msg), client);
                 }
                 else if (msg.type == "LEAVE")
                 {
@@ -391,7 +393,7 @@ namespace DrawServer
 
                 var registerPayload = new
                 {
-                    ip_address = "192.168.2.2",
+                    ip_address = AppConfig.NodeIp,
                     port = _currentNodePort
                 };
 
@@ -399,7 +401,7 @@ namespace DrawServer
                 var content = new StringContent(jsonString, Encoding.UTF8, "application/json");
 
                 // Gửi POST Request lên API của Master Server (Cổng 5274)
-                var response = await _httpClient.PostAsync("http://192.168.2.2:5274/api/node/register", content);
+                var response = await _httpClient.PostAsync($"http://{AppConfig.MasterServerIp}:{AppConfig.MasterServerPort}/api/node/register", content);
 
                 if (response.IsSuccessStatusCode)
                 {
@@ -423,7 +425,7 @@ namespace DrawServer
             catch (Exception ex)
             {
                 Console.ForegroundColor = ConsoleColor.Red;
-                Console.WriteLine($"[NODE SERVER] LỖI MẠNG: Không thể kết nối tới Master Server tại http://192.168.2.2:5274");
+                Console.WriteLine($"[NODE SERVER] LỖI MẠNG: Không thể kết nối tới Master Server tại http://{AppConfig.MasterServerIp}:{AppConfig.MasterServerPort}");
                 Console.WriteLine($"[NODE SERVER] Chi tiết lỗi: {ex.Message}");
                 Console.ResetColor();
             }
@@ -475,8 +477,9 @@ namespace DrawServer
                 // KHÓA luồng stream: Chỉ 1 tác vụ được ghi dữ liệu tại 1 thời điểm
                 lock (client)
                 {
-                    client.GetStream().Write(data, 0, data.Length);
-                    client.GetStream().Flush();
+                    var stream = client.GetStream();
+                    stream.Write(data, 0, data.Length);
+                    stream.Flush();
                 }
             }
             catch (Exception ex)

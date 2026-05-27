@@ -119,7 +119,7 @@ public class RoomController : ControllerBase
             if (node == null)
             {
                 Console.ForegroundColor = ConsoleColor.Red;
-                Console.WriteLine("[MASTER SERVER - LOAD BALANCER] THẤT BẠI: Từ chối điều hướng User {userId} do không tìm thấy Node khả dụng.");
+                Console.WriteLine($"[MASTER SERVER - LOAD BALANCER] THẤT BẠI: Từ chối điều hướng User {userId} do không tìm thấy Node khả dụng.");
                 Console.ResetColor();
 
                 return BadRequest(new { message = "Hệ thống máy chủ vẽ đang quá tải!" });
