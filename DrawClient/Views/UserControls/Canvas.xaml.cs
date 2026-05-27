@@ -952,10 +952,6 @@ namespace DrawClient.Views.UserControls
             string tool = _viewModel.SelectedTool?.ToLowerInvariant();
             string penType = _viewModel.Toolbar.CurrentPenType?.ToLowerInvariant();
             bool isEraser = _viewModel.Toolbar.IsEraserSelected || tool == "eraser";
-            if (_viewModel.SelectedTool == "eraser")
-            {
-                _viewModel.SendDrawData(lastPoint, currentPoint);
-            }
 
             // 1. CHẾ ĐỘ VẼ HÌNH (SHAPE MODE)
             if (isShapeDrawing)
@@ -1016,6 +1012,18 @@ namespace DrawClient.Views.UserControls
                     color = "#ERASE"
                 };
                 ClientSocket.Instance.Send(eraseMsg);
+
+                // Track local erase for undo
+                _viewModel.UndoRedoManager.AddAction(new DrawAction(
+                    "ERASE",
+                    lastPoint,
+                    currentPoint,
+                    "#ERASE",
+                    _viewModel.Toolbar.EraserSize,
+                    ClientSocket.Instance.CurrentUserId,
+                    ClientSocket.Instance.CurrentUsername,
+                    _viewModel.RoomId));
+                _viewModel.UpdateHistoryUI();
 
                 // Gọi hàm quét chữ khi rê chuột
                 EraseTextAtPoint(currentPoint);
@@ -1148,6 +1156,21 @@ namespace DrawClient.Views.UserControls
                     color = _viewModel.Toolbar.CurrentShapeColor,
                     thickness = _viewModel.Toolbar.CurrentShapeThickness
                 });
+
+                // Track local shape for undo
+                _viewModel.UndoRedoManager.AddAction(new DrawAction(
+                    "SHAPE",
+                    _startPoint,
+                    endPoint,
+                    _viewModel.Toolbar.CurrentShapeColor,
+                    _viewModel.Toolbar.CurrentShapeThickness,
+                    ClientSocket.Instance.CurrentUserId,
+                    ClientSocket.Instance.CurrentUsername,
+                    _viewModel.RoomId)
+                {
+                    ShapeType = penType
+                });
+                _viewModel.UpdateHistoryUI();
 
                 isShapeDrawing = false;
 
