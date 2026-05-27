@@ -711,6 +711,7 @@ namespace DrawClient.ViewModels
                                     drawMsg.userId,
                                     drawMsg.username,
                                     RoomId));
+                                UpdateHistoryUI();
                             }
                             break;
 
@@ -735,6 +736,7 @@ namespace DrawClient.ViewModels
                                     drawMsg.userId,
                                     drawMsg.username,
                                     RoomId));
+                                UpdateHistoryUI();
                             }
                             break;
 
@@ -755,6 +757,7 @@ namespace DrawClient.ViewModels
                                     drawMsg.userId,
                                     drawMsg.username,
                                     RoomId));
+                                UpdateHistoryUI();
                             }
                             break;
 
@@ -771,6 +774,7 @@ namespace DrawClient.ViewModels
                                     drawMsg.userId,
                                     drawMsg.username,
                                     RoomId));
+                                UpdateHistoryUI();
                             }
                             break;
 
@@ -1052,6 +1056,7 @@ namespace DrawClient.ViewModels
                 ShapeType = isShape ? CurrentShape : null
             };
             UndoRedoManager.AddAction(drawAction);
+            UpdateHistoryUI();
 
             // 4. Gửi dữ liệu đã xử lý nhất quán sang server qua Socket
             if (p1.X == p2.X && p1.Y == p2.Y) return;
@@ -1446,12 +1451,13 @@ namespace DrawClient.ViewModels
             }
         }
 
-        private void UpdateHistoryUI()
+        public void UpdateHistoryUI()
         {
             int userId = ClientSocket.Instance.CurrentUserId;
             CanUndo = UndoRedoManager.CanUndo(userId);
             CanRedo = UndoRedoManager.CanRedo(userId);
             HistoryInfo = $"History: {UndoRedoManager.UndoCount} Undo | {UndoRedoManager.RedoCount} Redo";
+            CommandManager.InvalidateRequerySuggested();
         }
         public void Cleanup()
         {
