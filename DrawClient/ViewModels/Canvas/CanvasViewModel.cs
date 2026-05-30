@@ -1,4 +1,5 @@
 ﻿using DrawClient.Models;
+using DrawClient.Views;
 using DrawClient.Services;
 using DrawClient.ViewModels.Canvas;
 using System;
@@ -32,7 +33,7 @@ namespace DrawClient.ViewModels
     {
         public ToolbarViewModel Toolbar { get; set; } = new ToolbarViewModel();
 
-        public Action<Point, Point, string, double, string, bool> OnLineReceived;
+        public Action<Point, Point, string, double, string, bool, string> OnLineReceived;
         public Action<string> OnSelectionTransformedReceived; // Thêm dòng này để View lắng nghe
         public Action<Point, Point, double> OnEraseReceived;
         public Action<Point, string, double, string, int> OnLaserReceived;
@@ -57,6 +58,8 @@ namespace DrawClient.ViewModels
         public event Action OnReplayFinished;
 
         private List<DrawMessage> _rawHistory = new List<DrawMessage>();
+        // Dùng để throttle UpdateHistoryUI: chỉ cập nhật khi groupId của DRAW thay đổi
+        private string _lastReceivedDrawGroupId = null;
         private CancellationTokenSource _playCts;
 
 
@@ -304,6 +307,8 @@ namespace DrawClient.ViewModels
             });
 
             ClearCanvasCommand = new RelayCommand(ExecuteClearCanvas);
+            //logout
+            LogoutCommand = new RelayCommand(ExecuteLogout);
             // Undo/Redo
             UpdateHistoryUI();
 
@@ -605,15 +610,51 @@ namespace DrawClient.ViewModels
             ClientSocket.Instance.OnConnectionLost -= HandleConnectionLost;
             ClientSocket.Instance.OnConnectionLost += HandleConnectionLost;
 
-            // Nếu HISTORY đã đến trước khi CanvasViewModel subscribe (race condition lúc vào phòng),
-            // replay lại để canvas load được history ngay khi mở.
+            // Nếu HISTORY đã đến trước khi Canvas UI được set up (race condition lúc vào phòng),
+            // defer việc replay đến ApplicationIdle để đảm bảo Canvas_DataContextChanged đã chạy
+            // và OnLineReceived đã được subscribe trước khi HISTORY bắt đầu dispatch các DRAW events.
             string pendingHistory = ClientSocket.Instance.LastHistoryJson;
             if (!string.IsNullOrEmpty(pendingHistory))
             {
-                Task.Run(() => HandleSocketMessage(pendingHistory));
+                Application.Current?.Dispatcher.BeginInvoke(new Action(() =>
+                {
+                    Task.Run(() => HandleSocketMessage(pendingHistory));
+                }), System.Windows.Threading.DispatcherPriority.ApplicationIdle);
             }
         }
 
+        private void ExecuteLogout(object obj)
+        {
+            try
+            {
+                // Ngắt kết nối socket giống Dashboard
+                ClientSocket.Instance.Disconnect();
+            }
+            catch { }
+
+            // Xóa sạch Session đăng nhập hệ thống công khai
+            LoginViewModel.Token = null;
+            LoginViewModel.CurrentUserId = 0;
+            LoginViewModel.CurrentUsername = null;
+
+            if (ClientSocket.Instance != null)
+            {
+                ClientSocket.Instance.CurrentUserId = 0;
+                ClientSocket.Instance.CurrentUsername = string.Empty;
+            }
+
+            // Ẩn popup đi
+            IsProfilePopoverVisible = false;
+
+            // Điều hướng ứng dụng quay trở về màn hình LoginScreen bằng Main Thread UI
+            Application.Current.Dispatcher.Invoke(() =>
+            {
+                if (Application.Current.MainWindow != null)
+                {
+                    Application.Current.MainWindow.Content = new LoginScreen();
+                }
+            });
+        }
         private void HandleConnectionLost(ConnectionLostArgs args)
         {
             InvokeUI(() =>
@@ -709,28 +750,46 @@ namespace DrawClient.ViewModels
                             // TRANSFORM_SELECTION dùng chỉ số stroke tại thời điểm ghi — cần theo dõi
                             // danh sách stroke hiện tại để kiểm tra index có còn hợp lệ không.
                             var activeSet = new HashSet<DrawMessage>(activeMessages);
-                            // Tracks stroke-adding messages in canvas order (mirrors MyCanvas.Strokes)
+                            // Tracks stroke-adding messages in canvas order (mirrors MyCanvas.Strokes).
+                            // Mỗi strokeGroupId DRAW chỉ đếm 1 entry vì DrawNetworkLine gom các segment
+                            // vào 1 stroke — khớp với native InkCanvas stroke để TRANSFORM index đúng.
                             var currentStrokeList = new List<DrawMessage>();
+                            var seenDrawGroups = new HashSet<string>();
 
                             foreach (var h in _rawHistory)
                             {
                                 if (activeSet.Contains(h))
                                 {
                                     DispatchDraw(h);
-                                    if (h.type == "DRAW" || h.type == "SHAPE")
+                                    if (h.type == "SHAPE")
+                                    {
                                         currentStrokeList.Add(h);
+                                    }
+                                    else if (h.type == "DRAW")
+                                    {
+                                        string gid = !string.IsNullOrEmpty(h.strokeGroupId) ? h.strokeGroupId : h.actionId;
+                                        if (string.IsNullOrEmpty(gid) || seenDrawGroups.Add(gid))
+                                            currentStrokeList.Add(h);
+                                    }
                                 }
                                 else if (h.type == "TRANSFORM_SELECTION" && !string.IsNullOrEmpty(h.text))
                                 {
-                                    // Kiểm tra mọi index trong TRANSFORM_SELECTION có map đúng active stroke không
-                                    // tránh trường hợp stroke A bị undo → index 0 chỉ sang stroke B
                                     bool indexSafe = true;
                                     try
                                     {
                                         var firstPart = h.text.Split('|')[0];
                                         foreach (var idxStr in firstPart.Split(','))
                                         {
-                                            if (int.TryParse(idxStr.Trim(), out int idx))
+                                            string trimmed = idxStr.Trim();
+                                            if (string.IsNullOrEmpty(trimmed)) continue;
+
+                                            if (trimmed.StartsWith("G:"))
+                                            {
+                                                // GroupId-based: luôn an toàn — lookup theo groupId
+                                                // sẽ tự trả về null nếu group không tồn tại
+                                                continue;
+                                            }
+                                            else if (int.TryParse(trimmed, out int idx))
                                             {
                                                 if (idx < 0 || idx >= currentStrokeList.Count ||
                                                     !activeSet.Contains(currentStrokeList[idx]))
@@ -818,7 +877,13 @@ namespace DrawClient.ViewModels
                                 if (!string.IsNullOrEmpty(drawMsg.actionId))
                                     drawAction.Id = drawMsg.actionId;
                                 UndoRedoManager.AddAction(drawAction);
-                                UpdateHistoryUI();
+                                // Throttle: chỉ cập nhật UI khi bắt đầu một group mới,
+                                // tránh gọi UpdateHistoryUI 50+ lần cho từng segment của một nét.
+                                if (drawMsg.strokeGroupId != _lastReceivedDrawGroupId)
+                                {
+                                    _lastReceivedDrawGroupId = drawMsg.strokeGroupId;
+                                    UpdateHistoryUI();
+                                }
                             }
                             break;
 
@@ -986,7 +1051,8 @@ namespace DrawClient.ViewModels
                             draw.color,
                             draw.thickness,
                             draw.penType,
-                            draw.isHighlighter));
+                            draw.isHighlighter,
+                            draw.strokeGroupId));
                     break;
 
 
@@ -1319,8 +1385,20 @@ namespace DrawClient.ViewModels
 
             IsProfilePopoverVisible = false;
 
-            // Về màn hình đăng nhập
-            GoToLogin?.Invoke();
+            // Thông báo rời phòng cho người dùng
+            MessageBox.Show(
+                "Bạn đã đăng xuất thành công.\nMọi người trong phòng đã được thông báo bạn rời đi.",
+                "Rời phòng",
+                MessageBoxButton.OK,
+                MessageBoxImage.Information);
+
+            // Về màn hình đăng nhập — đảm bảo chạy trên UI thread
+            if (GoToLogin == null)
+            {
+                System.Diagnostics.Debug.WriteLine("[CanvasViewModel] GoToLogin delegate is null — navigation skipped.");
+                return;
+            }
+            Application.Current?.Dispatcher.Invoke(() => GoToLogin.Invoke());
         }
 
         private string GetInitials(string username)

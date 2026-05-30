@@ -294,6 +294,13 @@ namespace DrawClient
                     if (type == "HISTORY")
                         LastHistoryJson = msg; // Cache để CanvasViewModel subscribe trễ vẫn nhận được
 
+                    // PING → respond with PONG để server biết client còn sống
+                    if (type == "PING")
+                    {
+                        try { Send(new DrawMessage { type = "PONG", userId = CurrentUserId }); } catch { }
+                        return;
+                    }
+
                     if (
                         type == "HISTORY" ||
                         type == "CHAT_HISTORY"||

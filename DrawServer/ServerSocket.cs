@@ -29,6 +29,12 @@ namespace DrawServer
         // Quản lý thông tin User trên mỗi Connection (UserId, RoomId, Username)
         private ConcurrentDictionary<TcpClient, (int UserId, string RoomId, string Username)> clientMetadata
             = new ConcurrentDictionary<TcpClient, (int UserId, string RoomId, string Username)>();
+
+        // Theo dõi thời điểm nhận tin nhắn cuối từ mỗi client (dùng để phát hiện mất kết nối)
+        private ConcurrentDictionary<TcpClient, DateTime> _lastActivity
+            = new ConcurrentDictionary<TcpClient, DateTime>();
+
+        private const int InactivityTimeoutSeconds = 70; // ~1 phút
         
         private bool _isRunning = true;
         private static readonly HttpClient _httpClient = new HttpClient();
@@ -69,18 +75,27 @@ namespace DrawServer
             }
         }
 
-       private async Task HeartbeatCheckAsync(TcpClient client)
+        private async Task HeartbeatCheckAsync(TcpClient client)
         {
             while (_isRunning && client.Connected)
             {
-                await Task.Delay(30000);
+                await Task.Delay(30000); // Gửi PING mỗi 30 giây
                 try
                 {
                     if (!client.Connected) break;
-                    var pingMsg = new DrawMessage { type = "PING" };
-                    string json = JsonSerializer.Serialize(pingMsg) + "\n";
-                    byte[] data = Encoding.UTF8.GetBytes(json);
-                    SendPacketToClient(client, JsonSerializer.Serialize(pingMsg));
+
+                    // Kiểm tra inactivity: nếu client không phản hồi PONG trong InactivityTimeoutSeconds
+                    if (_lastActivity.TryGetValue(client, out DateTime last) &&
+                        (DateTime.UtcNow - last).TotalSeconds > InactivityTimeoutSeconds)
+                    {
+                        Console.ForegroundColor = ConsoleColor.Yellow;
+                        Console.WriteLine($"[NODE SERVER] Inactivity timeout — đóng kết nối client mất mạng.");
+                        Console.ResetColor();
+                        client.Close(); // Kích hoạt finally trong HandleClientAsync → gửi LEAVE cho room
+                        break;
+                    }
+
+                    SendPacketToClient(client, JsonSerializer.Serialize(new DrawMessage { type = "PING" }));
                 }
                 catch { break; }
             }
@@ -91,8 +106,12 @@ namespace DrawServer
         {
             using (NetworkStream stream = client.GetStream())
             {
+                // Timeout đọc: nếu client không gửi gì (kể cả PONG) trong 70s → coi là mất mạng
+                stream.ReadTimeout = InactivityTimeoutSeconds * 1000;
+
                 byte[] bytes = new byte[8192]; // Buffer lớn hơn một chút
                 StringBuilder messageBuffer = new StringBuilder();
+                _lastActivity[client] = DateTime.UtcNow;
                 _ = HeartbeatCheckAsync(client);
                 bool isGracefulLeave = false;
 
@@ -160,7 +179,10 @@ namespace DrawServer
                         _ = NotifyMasterStatusChanged(targetUserId, int.Parse(targetRoomId), false);
                     }
 
-                    // 2. Xóa client khỏi danh sách phòng của Server trước 
+                    // Xóa entry inactivity tracking
+                    _lastActivity.TryRemove(client, out _);
+
+                    // 2. Xóa client khỏi danh sách phòng của Server trước
                     // (Để khi broadcast, Server không gửi ngược lại chính socket đã chết này)
                     RemoveClientFromAllRooms(client);
                     client.Close();
@@ -207,6 +229,13 @@ namespace DrawServer
 
                 var msg = JsonSerializer.Deserialize<DrawMessage>(jsonMsg, options);
                 if (msg == null) return false;
+
+                // Cập nhật thời gian hoạt động cuối cho mỗi tin nhắn nhận được
+                _lastActivity[client] = DateTime.UtcNow;
+
+                // PONG: client phản hồi heartbeat — chỉ cập nhật timestamp, không broadcast
+                if (msg.type == "PONG")
+                    return false;
 
                 if (msg.type == "JOIN")
                 {

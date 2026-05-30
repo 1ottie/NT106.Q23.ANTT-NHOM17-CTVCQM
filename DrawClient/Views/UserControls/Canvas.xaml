@@ -1539,7 +1539,7 @@
        PopupAnimation="Fade"
        StaysOpen="False">
 
-            <Border PreviewMouseDown="ProfilePopover_PreviewMouseDown"
+            <Border
             Background="#FFFFFF"
             CornerRadius="8"
             MinWidth="160"
@@ -1547,12 +1547,7 @@
             Width="200"
             Height="100">
 
-                <Border.Effect>
-                    <DropShadowEffect BlurRadius="8"
-                              ShadowDepth="2"
-                              Opacity="0.15"
-                              Color="#3C4043"/>
-                </Border.Effect>
+               
 
                 <StackPanel>
 
@@ -1614,6 +1609,7 @@
                     </Button>
 
                     <Button Command="{Binding LogoutCommand}"
+                    PreviewMouseLeftButtonDown="Logout_PreviewMouseLeftButtonDown"
                     Background="Transparent"
                     BorderThickness="0"
                     Cursor="Hand"

@@ -63,6 +63,8 @@ namespace DrawClient.Views.UserControls
         private readonly Dictionary<string, UIElement> _actionIdToChild = new Dictionary<string, UIElement>();
         // Lưu bản gốc (chưa transform) của native PEN strokes để replay transform đúng
         private readonly Dictionary<string, List<Stroke>> _groupNativeOriginals = new Dictionary<string, List<Stroke>>();
+        // strokeGroupId → stroke nhận từ mạng; mỗi group tích lũy thành 1 stroke thay vì nhiều đoạn rời
+        private readonly Dictionary<string, Stroke> _networkGroupStrokes = new Dictionary<string, Stroke>();
         // groupId → strokes trong lần redraw hiện tại (dùng Phase 2 apply TRANSFORM cho PEN)
         private Dictionary<string, List<Stroke>> _currentRedrawGroupStrokes = new Dictionary<string, List<Stroke>>();
 
@@ -73,6 +75,60 @@ namespace DrawClient.Views.UserControls
         private Border _textFloatingToolbar = null;
         private Border _colorIndicatorBtn = null;
         private bool _colorPickerOpen = false;
+
+        private void Logout_Click(object sender, RoutedEventArgs e)
+        {
+            // 1. Chủ động ép Popup đóng ngay lập tức để không bị kẹt giao diện
+            ProfilePopover.IsOpen = false;
+
+            // 2. Cập nhật lại biến Binding trong ViewModel (nếu có) để đồng bộ trạng thái công khai
+            if (this.DataContext is CanvasViewModel vm)
+            {
+                // Nếu trong CanvasViewModel của bạn có thuộc tính công khai này, hãy uncomment dòng dưới:
+                // vm.IsProfilePopoverVisible = false;
+            }
+
+            // 3. Dừng các Timer chạy ngầm của Canvas nếu có (Ví dụ laser timer tránh leak bộ nhớ)
+            if (_laserTimer != null && _laserTimer.IsEnabled)
+            {
+                _laserTimer.Stop();
+            }
+
+            // 4. Xóa dữ liệu phiên đăng nhập cũ trong LoginViewModel tĩnh (static)
+            LoginViewModel.Token = null;
+            LoginViewModel.CurrentUserId = 0;
+            LoginViewModel.CurrentUsername = string.Empty;
+
+            // 5. Reset thông tin định danh trên Socket kết nối 
+            if (ClientSocket.Instance != null)
+            {
+                ClientSocket.Instance.CurrentUserId = 0;
+                ClientSocket.Instance.CurrentUsername = string.Empty;
+                // Nếu hệ thống của bạn có hàm đóng hẳn kết nối phòng, hãy gọi ở đây:
+                // ClientSocket.Instance.Disconnect(); 
+            }
+
+            // 6. Tìm MainWindow của ứng dụng và đổi Content về lại LoginScreen công khai
+            Window mainWindow = Window.GetWindow(this);
+            if (mainWindow != null)
+            {
+                mainWindow.Content = new LoginScreen();
+            }
+        }
+
+        private void Logout_PreviewMouseLeftButtonDown(object sender, MouseButtonEventArgs e)
+        {
+            // Ép ViewModel thực thi lệnh Logout ngay khi nhấn chuột xuống, 
+            // trước khi InkCanvas làm mất focus và đóng Popup
+            if (this.DataContext is CanvasViewModel vm && vm.LogoutCommand != null)
+            {
+                if (vm.LogoutCommand.CanExecute(null))
+                {
+                    vm.LogoutCommand.Execute(null);
+                    e.Handled = true; // Đánh dấu đã xử lý để tránh lỗi double-click hoặc kẹt sự kiện
+                }
+            }
+        }
 
 
         public Canvas()
@@ -116,8 +172,9 @@ namespace DrawClient.Views.UserControls
         }
         private void MyCanvas_SelectionMoving(object sender, InkCanvasSelectionEditingEventArgs e)
         {
-            // Lưu lại vị trí Bounds cũ ngay khi người dùng bắt đầu click giữ và kéo chuột di chuyển
-            _oldSelectionBounds = MyCanvas.GetSelectedStrokes().GetBounds();
+            // e.OldRectangle bao gồm cả strokes lẫn UIElement children (TextBlock) →
+            // đúng hơn GetSelectedStrokes().GetBounds() khi chỉ có text được chọn.
+            _oldSelectionBounds = e.OldRectangle;
         }
 
         private void MyCanvas_SelectionMoved(object sender, EventArgs e)
@@ -128,7 +185,18 @@ namespace DrawClient.Views.UserControls
         private void MyCanvas_StrokeCollected(object sender, InkCanvasStrokeCollectedEventArgs e)
         {
             string groupId = _viewModel?.CurrentStrokeGroupId ?? _lastStrokeGroupId;
-            if (string.IsNullOrEmpty(groupId)) return;
+            if (string.IsNullOrEmpty(groupId))
+            {
+                // Nét đầu tiên: WPF InkCanvas stylus plugin init có thể khiến PreviewMouseDown
+                // không nhận diện được InkCanvas → BeginStroke() bị bỏ qua → groupId null.
+                // Tạo groupId ngay bây giờ để FallbackSyncStroke có thể sync đúng.
+                if (_viewModel == null) return;
+                _viewModel.BeginStroke();
+                groupId = _viewModel.CurrentStrokeGroupId;
+                _lastStrokeGroupId = groupId;
+                _viewModel.EndStroke();
+                if (string.IsNullOrEmpty(groupId)) return;
+            }
             if (!_groupNativeStrokes.ContainsKey(groupId))
                 _groupNativeStrokes[groupId] = new List<Stroke>();
             _groupNativeStrokes[groupId].Add(e.Stroke);
@@ -189,11 +257,16 @@ namespace DrawClient.Views.UserControls
             if (_viewModel != null)
             {
                 _viewModel.OnLineReceived -= DrawNetworkLine;
+                _viewModel.OnEraseReceived -= EraseNetworkStroke;
+                _viewModel.OnLaserReceived -= ShowRemoteLaser;
                 _viewModel.OnCanvasCleared -= ClearLocalCanvas;
                 _viewModel.PropertyChanged -= ViewModel_PropertyChanged;
                 _viewModel.OnShapeReceived -= DrawShape;
                 _viewModel.OnTextReceived -= DrawText;
                 _viewModel.OnDeleteTextReceived -= DeleteTextFromNetwork;
+                _viewModel.OnSelectionTransformedReceived -= HandleRemoteSelectionTransform;
+                _viewModel.OnUndoRedo -= RedrawAllFromActions;
+                _viewModel.OnTransformUndoRedo -= HandleTransformUndoRedo;
                 _viewModel.OnReplayDraw -= ReplayDraw;
                 _viewModel.OnReplayErase -= ReplayErase;
                 _viewModel.OnReplayShape -= ReplayShape;
@@ -210,6 +283,11 @@ namespace DrawClient.Views.UserControls
             _childToAction.Clear();
             _actionIdToStroke.Clear();
             _actionIdToChild.Clear();
+            _networkGroupStrokes.Clear();
+            if (_laserTimer != null && _laserTimer.IsEnabled)
+            {
+                _laserTimer.Stop();
+            }
         }
 
         private void MyCanvas_SelectionChanged(object sender, EventArgs e)
@@ -233,34 +311,67 @@ namespace DrawClient.Views.UserControls
             if (_viewModel == null) return;
 
             var selectedStrokes = MyCanvas.GetSelectedStrokes();
-            if (selectedStrokes == null || selectedStrokes.Count == 0) return;
+            var selectedElems = MyCanvas.GetSelectedElements();
+            bool hasStrokes = selectedStrokes != null && selectedStrokes.Count > 0;
+            bool hasText = selectedElems != null && selectedElems.OfType<TextBlock>().Any();
+            if (!hasStrokes && !hasText) return;
 
-            Rect newBounds = selectedStrokes.GetBounds();
+            // Tính newBounds bao gồm cả strokes lẫn TextBlocks đang được chọn
+            Rect newBounds = hasStrokes ? selectedStrokes.GetBounds() : Rect.Empty;
+            if (hasText && selectedElems != null)
+            {
+                foreach (UIElement el in selectedElems)
+                {
+                    if (el is TextBlock tb)
+                    {
+                        double l = InkCanvas.GetLeft(tb); if (double.IsNaN(l)) l = 0;
+                        double t = InkCanvas.GetTop(tb);  if (double.IsNaN(t)) t = 0;
+                        tb.Measure(new Size(double.PositiveInfinity, double.PositiveInfinity));
+                        var tbRect = new Rect(l, t, tb.DesiredSize.Width, tb.DesiredSize.Height);
+                        newBounds = newBounds.IsEmpty ? tbRect : Rect.Union(newBounds, tbRect);
+                    }
+                }
+            }
+            if (newBounds.IsEmpty) return;
 
             if (Math.Abs(newBounds.X - _oldSelectionBounds.X) > 0.1 ||
                 Math.Abs(newBounds.Y - _oldSelectionBounds.Y) > 0.1 ||
                 Math.Abs(newBounds.Width - _oldSelectionBounds.Width) > 0.1 ||
                 Math.Abs(newBounds.Height - _oldSelectionBounds.Height) > 0.1)
             {
-                // Thu thập các action bị ảnh hưởng
+                // Thu thập các action/group bị ảnh hưởng để UndoRedoManager theo dõi
                 var affectedActionIds = new List<string>();
                 var affectedGroupIds = new List<string>();
 
                 foreach (var stroke in selectedStrokes)
                 {
-                    if (!_strokeToAction.TryGetValue(stroke, out var affectedAction)) continue;
-
-                    if (affectedAction.ActionType == "DRAW" &&
-                        !string.IsNullOrEmpty(affectedAction.StrokeGroupId) &&
-                        _groupNativeOriginals.ContainsKey(affectedAction.StrokeGroupId))
+                    if (_strokeToAction.TryGetValue(stroke, out var affectedAction))
                     {
-                        if (!affectedGroupIds.Contains(affectedAction.StrokeGroupId))
-                            affectedGroupIds.Add(affectedAction.StrokeGroupId);
+                        if (affectedAction.ActionType == "DRAW" &&
+                            !string.IsNullOrEmpty(affectedAction.StrokeGroupId) &&
+                            _groupNativeOriginals.ContainsKey(affectedAction.StrokeGroupId))
+                        {
+                            if (!affectedGroupIds.Contains(affectedAction.StrokeGroupId))
+                                affectedGroupIds.Add(affectedAction.StrokeGroupId);
+                        }
+                        else
+                        {
+                            if (!affectedActionIds.Contains(affectedAction.Id))
+                                affectedActionIds.Add(affectedAction.Id);
+                        }
                     }
                     else
                     {
-                        if (!affectedActionIds.Contains(affectedAction.Id))
-                            affectedActionIds.Add(affectedAction.Id);
+                        // Stroke từ client khác nhận qua mạng → tra ngược _networkGroupStrokes
+                        foreach (var kvp in _networkGroupStrokes)
+                        {
+                            if (kvp.Value == stroke)
+                            {
+                                if (!affectedGroupIds.Contains(kvp.Key))
+                                    affectedGroupIds.Add(kvp.Key);
+                                break;
+                            }
+                        }
                     }
                 }
 
@@ -301,12 +412,30 @@ namespace DrawClient.Views.UserControls
                     _viewModel.UpdateHistoryUI();
                 }
 
-                // Gửi network sync: stroke indices + TextBlock child indices
-                var selectedIndices = new List<int>();
+                // Gửi network sync dùng "G:groupId" thay vì index —
+                // tránh index sai khi các client vẽ đồng thời (index thay đổi theo thứ tự nhận).
+                var selectedIdentifiers = new List<string>();
                 foreach (var stroke in selectedStrokes)
                 {
-                    int index = MyCanvas.Strokes.IndexOf(stroke);
-                    if (index >= 0) selectedIndices.Add(index);
+                    string groupId = null;
+                    if (_strokeToAction.TryGetValue(stroke, out var act))
+                        groupId = act.StrokeGroupId;
+                    else
+                    {
+                        foreach (var kvp in _networkGroupStrokes)
+                        {
+                            if (kvp.Value == stroke) { groupId = kvp.Key; break; }
+                        }
+                    }
+
+                    if (!string.IsNullOrEmpty(groupId))
+                        selectedIdentifiers.Add("G:" + groupId);
+                    else
+                    {
+                        // Fallback: dùng index (backward-compat với data cũ trong DB)
+                        int idx = MyCanvas.Strokes.IndexOf(stroke);
+                        if (idx >= 0) selectedIdentifiers.Add(idx.ToString());
+                    }
                 }
 
                 // Thu thập index của TextBlock bị di chuyển
@@ -325,12 +454,12 @@ namespace DrawClient.Views.UserControls
                     }
                 }
 
-                if (selectedIndices.Count > 0 || selectedChildIndices.Count > 0)
+                if (selectedIdentifiers.Count > 0 || selectedChildIndices.Count > 0)
                 {
                     string childData = selectedChildIndices.Count > 0
                         ? string.Join(",", selectedChildIndices) : "";
                     _viewModel.SendSelectionTransform(
-                        string.Join(",", selectedIndices), _oldSelectionBounds, newBounds, childData);
+                        string.Join(",", selectedIdentifiers), _oldSelectionBounds, newBounds, childData);
                 }
 
                 _oldSelectionBounds = newBounds;
@@ -410,6 +539,11 @@ namespace DrawClient.Views.UserControls
                 _viewModel.OnReplayRedo += ReplayRedo;
                 _viewModel.OnReplayClear += ReplayClear;
                 _viewModel.OnReplayFinished += ReplayFinished;
+
+                // Nếu có DRAW actions đã đến trước khi Canvas được set up (OnLineReceived còn null),
+                // redraw lại để các nét đó xuất hiện ngay thay vì chờ đến undo/redo.
+                if (_viewModel.UndoRedoManager.GetAllActionsIncludingUndone().Any(a => !a.IsUndone))
+                    RedrawAllFromActions();
             }
         }
 
@@ -422,6 +556,9 @@ namespace DrawClient.Views.UserControls
                 _childToAction.Clear();
                 _actionIdToStroke.Clear();
                 _actionIdToChild.Clear();
+                // Xóa _networkGroupStrokes vì strokes được rebuild từ actions —
+                // các entry cũ sẽ trỏ vào strokes không còn tồn tại nữa.
+                _networkGroupStrokes.Clear();
                 _currentRedrawGroupStrokes = new Dictionary<string, List<Stroke>>();
 
                 var textBlocksToRemove = MyCanvas.Children.OfType<TextBlock>().ToList();
@@ -548,17 +685,46 @@ namespace DrawClient.Views.UserControls
                         (!string.IsNullOrEmpty(action.StrokeGroupId) && affectedGroups.Contains(action.StrokeGroupId)))
                         affectedStrokes.Add(stroke);
                 }
+                else if (affectedGroups.Count > 0)
+                {
+                    // Network stroke (không có trong _strokeToAction) — tra ngược _networkGroupStrokes
+                    foreach (var kvp in _networkGroupStrokes)
+                    {
+                        if (kvp.Value == stroke && affectedGroups.Contains(kvp.Key))
+                        {
+                            affectedStrokes.Add(stroke);
+                            break;
+                        }
+                    }
+                }
             }
 
             if (affectedStrokes.Count == 0) return;
 
-            var indices = new List<int>();
+            // Dùng G:groupId thay vì index để sync undo/redo transform đúng trên các client
+            var identifiers = new List<string>();
             foreach (var s in affectedStrokes)
             {
-                int idx = MyCanvas.Strokes.IndexOf(s);
-                if (idx >= 0) indices.Add(idx);
+                string groupId = null;
+                if (_strokeToAction.TryGetValue(s, out var act))
+                    groupId = act.StrokeGroupId;
+                else
+                {
+                    foreach (var kvp in _networkGroupStrokes)
+                    {
+                        if (kvp.Value == s) { groupId = kvp.Key; break; }
+                    }
+                }
+
+                if (!string.IsNullOrEmpty(groupId))
+                    identifiers.Add("G:" + groupId);
+                else
+                {
+                    int fallbackIdx = MyCanvas.Strokes.IndexOf(s);
+                    if (fallbackIdx >= 0) identifiers.Add(fallbackIdx.ToString());
+                }
             }
-            if (indices.Count == 0) return;
+            if (identifiers.Count == 0) return;
 
             // Reverse: nếu undo thì gửi newBounds→oldBounds, nếu redo thì gửi oldBounds→newBounds
             Rect oldB, newB;
@@ -577,7 +743,7 @@ namespace DrawClient.Views.UserControls
                                 transformAction.TransformNewW, transformAction.TransformNewH);
             }
 
-            _viewModel.SendSelectionTransform(string.Join(",", indices), oldB, newB);
+            _viewModel.SendSelectionTransform(string.Join(",", identifiers), oldB, newB);
         }
 
         #region Replay/Play Handlers
@@ -1220,6 +1386,7 @@ namespace DrawClient.Views.UserControls
                 _childToAction.Clear();
                 _actionIdToStroke.Clear();
                 _actionIdToChild.Clear();
+                _networkGroupStrokes.Clear();
                 _currentRedrawGroupStrokes = new Dictionary<string, List<Stroke>>();
             });
         }
@@ -1548,7 +1715,7 @@ namespace DrawClient.Views.UserControls
                 isDrawing = false;
                 // Lưu group ID TRƯỚC khi EndStroke() xóa nó — dùng cho eraser click và StrokeCollected
                 _lastStrokeGroupId = _viewModel?.CurrentStrokeGroupId;
-                _viewModel?.EndStroke();
+                // Không gọi EndStroke() ở đây — SendDrawData phía dưới cần CurrentStrokeGroupId còn hợp lệ
 
                 Point endPoint = e.GetPosition(MyCanvas);
 
@@ -1594,10 +1761,13 @@ namespace DrawClient.Views.UserControls
                     }
                     else if (_viewModel.CurrentEditingMode == InkCanvasEditingMode.Ink)
                     {
-                        // Đồng bộ mọi công cụ vẽ Ink (pencil, highlighter, fountain, ...)
+                        // CurrentStrokeGroupId vẫn hợp lệ vì EndStroke() chưa được gọi
                         _viewModel.SendDrawData(endPoint, tinyMove);
                     }
                 }
+
+                // Gọi EndStroke() SAU khi đã gửi tất cả dữ liệu để StrokeGroupId được gán đúng
+                _viewModel?.EndStroke();
 
                 if (EraserCursor != null)
                 {
@@ -2002,7 +2172,7 @@ namespace DrawClient.Views.UserControls
             }
         }
 
-        private void DrawNetworkLine(Point start, Point end, string colorStr, double thickness, string penType, bool isSync)
+        private void DrawNetworkLine(Point start, Point end, string colorStr, double thickness, string penType, bool isSync, string strokeGroupId = null)
         {
             Application.Current.Dispatcher.Invoke(() =>
             {
@@ -2011,20 +2181,23 @@ namespace DrawClient.Views.UserControls
                     // 1. KIỂM TRA LỆNH XÓA VÀ XỬ LÝ AN TOÀN
                     if (colorStr == "#ERASE" || penType?.Equals("eraser", StringComparison.OrdinalIgnoreCase) == true || penType?.Equals("ERASE", StringComparison.OrdinalIgnoreCase) == true)
                     {
-                        // Đảm bảo độ dày xóa luôn lớn hơn 0 (tránh văng lỗi EllipseStylusShape)
                         double safeThickness = Math.Max(2.0, thickness);
-
-                        // Nếu click tại chỗ (điểm đầu = điểm cuối), WPF sẽ không xóa, ta cần tạo 1 độ lệch cực nhỏ
                         if (start.X == end.X && start.Y == end.Y)
-                        {
                             end = new Point(start.X + 0.1, start.Y + 0.1);
-                        }
-
-                        MyCanvas.Strokes.Erase(
-                            new Point[] { start, end },
-                            new EllipseStylusShape(safeThickness, safeThickness));
-                        return; // THOÁT LUÔN
+                        MyCanvas.Strokes.Erase(new Point[] { start, end }, new EllipseStylusShape(safeThickness, safeThickness));
+                        return;
                     }
+
+                    // 2. Nếu có strokeGroupId, tích lũy điểm vào stroke đã tạo cho group này
+                    //    thay vì tạo nhiều stroke rời — giúp index khớp với native InkCanvas stroke
+                    if (!string.IsNullOrEmpty(strokeGroupId) &&
+                        _networkGroupStrokes.TryGetValue(strokeGroupId, out var existingStroke) &&
+                        MyCanvas.Strokes.Contains(existingStroke))
+                    {
+                        existingStroke.StylusPoints.Add(new StylusPoint(end.X, end.Y));
+                        return;
+                    }
+
                     string incomingPenType = penType?.Trim();
                     bool isHighlighter = string.Equals(incomingPenType, "highlighter", StringComparison.OrdinalIgnoreCase)
                                          || (colorStr?.StartsWith("[HL]") == true);
@@ -2034,10 +2207,10 @@ namespace DrawClient.Views.UserControls
                     Color parsedColor = (Color)ColorConverter.ConvertFromString(colorToUse);
 
                     StylusPointCollection points = new StylusPointCollection
-            {
-                new StylusPoint(start.X, start.Y),
-                new StylusPoint(end.X, end.Y)
-            };
+                    {
+                        new StylusPoint(start.X, start.Y),
+                        new StylusPoint(end.X, end.Y)
+                    };
 
                     DrawingAttributes da = new DrawingAttributes
                     {
@@ -2046,7 +2219,6 @@ namespace DrawClient.Views.UserControls
                         IsHighlighter = isHighlighter
                     };
 
-                    // Cấu hình nét vẽ thời gian thực từ mạng truyền về
                     if (isHighlighter)
                     {
                         da.Width = thickness * 1.5;
@@ -2072,6 +2244,10 @@ namespace DrawClient.Views.UserControls
 
                     Stroke stroke = new Stroke(points) { DrawingAttributes = da };
                     MyCanvas.Strokes.Add(stroke);
+
+                    // 3. Đăng ký stroke này để các segment tiếp theo của cùng group được tích lũy vào
+                    if (!string.IsNullOrEmpty(strokeGroupId))
+                        _networkGroupStrokes[strokeGroupId] = stroke;
                 }
                 catch (Exception ex)
                 {
@@ -2860,12 +3036,47 @@ namespace DrawClient.Views.UserControls
 
                     if (!string.IsNullOrWhiteSpace(parts[0]))
                     {
-                        var indices = parts[0].Split(',')
-                            .Select(s => { int.TryParse(s.Trim(), out int v); return v; }).ToList();
-                        foreach (int idx in indices)
+                        foreach (string id in parts[0].Split(','))
                         {
-                            if (idx >= 0 && idx < MyCanvas.Strokes.Count)
-                                strokesToTransform.Add(MyCanvas.Strokes[idx]);
+                            string trimmedId = id.Trim();
+                            if (string.IsNullOrEmpty(trimmedId)) continue;
+
+                            if (trimmedId.StartsWith("G:"))
+                            {
+                                // Địa chỉ bằng strokeGroupId — tìm trong _networkGroupStrokes trước,
+                                // sau đó trong _groupNativeStrokes (native stroke của chính client này).
+                                string gid = trimmedId.Substring(2);
+                                bool addedNet = false;
+                                if (_networkGroupStrokes.TryGetValue(gid, out var netStroke))
+                                {
+                                    if (MyCanvas.Strokes.Contains(netStroke))
+                                    {
+                                        strokesToTransform.Add(netStroke);
+                                        addedNet = true;
+                                    }
+                                }
+                                if (!addedNet && _groupNativeStrokes.TryGetValue(gid, out var nativeList))
+                                {
+                                    foreach (var ns in nativeList)
+                                    {
+                                        if (MyCanvas.Strokes.Contains(ns))
+                                            strokesToTransform.Add(ns);
+                                    }
+                                    addedNet = true;
+                                }
+                                // Fallback: Shape/Text nhận từ mạng — tra qua actionId
+                                if (!addedNet && _actionIdToStroke.TryGetValue(gid, out var actionStroke))
+                                {
+                                    if (MyCanvas.Strokes.Contains(actionStroke))
+                                        strokesToTransform.Add(actionStroke);
+                                }
+                            }
+                            else if (int.TryParse(trimmedId, out int idx))
+                            {
+                                // Fallback: địa chỉ bằng index (data cũ từ DB)
+                                if (idx >= 0 && idx < MyCanvas.Strokes.Count)
+                                    strokesToTransform.Add(MyCanvas.Strokes[idx]);
+                            }
                         }
                     }
 
