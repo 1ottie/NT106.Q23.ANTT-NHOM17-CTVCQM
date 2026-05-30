@@ -214,6 +214,32 @@ namespace DrawClient.ViewModels.Canvas
                 OnPropertyChanged();
             }
         }
+
+        // ================= TEXT SETTINGS =================
+        private string _currentTextFont = "Roboto";
+        public string CurrentTextFont
+        {
+            get => _currentTextFont;
+            set { _currentTextFont = value; OnPropertyChanged(); }
+        }
+
+        private double _currentTextSize = 16.0;
+        public double CurrentTextSize
+        {
+            get => _currentTextSize;
+            set { _currentTextSize = Math.Max(8, Math.Min(72, value)); OnPropertyChanged(); }
+        }
+
+        private string _currentTextColor = "#000000";
+        public string CurrentTextColor
+        {
+            get => _currentTextColor;
+            set { _currentTextColor = value; OnPropertyChanged(); OnPropertyChanged(nameof(CurrentTextColorBrush)); }
+        }
+
+        public SolidColorBrush CurrentTextColorBrush =>
+            (SolidColorBrush)new BrushConverter().ConvertFromString(CurrentTextColor ?? "#000000");
+
         // ================= SIZE =================
 
         private double _pencilSize = 2;

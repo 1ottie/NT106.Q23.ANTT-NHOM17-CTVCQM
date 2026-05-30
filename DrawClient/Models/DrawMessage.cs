@@ -25,6 +25,7 @@ namespace DrawClient
         // TEXT
         public string text { get; set; }
         public double fontSize { get; set; }
+        public string fontFamily { get; set; }
 
         // CHAT
         public string username { get; set; }

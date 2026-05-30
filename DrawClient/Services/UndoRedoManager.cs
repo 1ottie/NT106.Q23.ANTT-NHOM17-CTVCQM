@@ -59,8 +59,10 @@ namespace DrawClient.Services
                 if (_undoGroupStacks[uid].Count == 0 || _undoGroupStacks[uid].Peek() != groupId)
                     _undoGroupStacks[uid].Push(groupId);
 
-                // Any new draw action clears the redo stack for that user
-                _redoGroupStacks[uid].Clear();
+                // TRANSFORM actions (local move/resize) không xóa redo stack —
+                // cho phép vẫn redo draw sau khi undo draw rồi move thứ khác.
+                if (action.ActionType != "TRANSFORM")
+                    _redoGroupStacks[uid].Clear();
 
                 // Trim history
                 if (_allActions.Count > MAX_HISTORY)
@@ -101,7 +103,9 @@ namespace DrawClient.Services
             }
         }
 
-        // Returns all DrawActions in the undone group, or null if nothing to undo.
+        // Returns actions in the undone group. Returns null only when nothing to undo.
+        // Returns empty list when group was processed but all actions were trimmed by MAX_HISTORY
+        // — caller MUST still call OnUndoRedo to keep canvas in sync.
         public List<DrawAction> Undo(int userId)
         {
             lock (_lock)
@@ -124,11 +128,12 @@ namespace DrawClient.Services
                         }
                     }
                 }
-                return result.Count > 0 ? result : null;
+                // Return empty list (not null) so callers know stack changed even if actions were trimmed
+                return result;
             }
         }
 
-        // Returns all DrawActions in the redone group, or null if nothing to redo.
+        // Returns actions in the redone group. Returns null only when nothing to redo.
         public List<DrawAction> Redo(int userId)
         {
             lock (_lock)
@@ -151,7 +156,7 @@ namespace DrawClient.Services
                         }
                     }
                 }
-                return result.Count > 0 ? result : null;
+                return result;
             }
         }
 
@@ -305,6 +310,12 @@ namespace DrawClient.Services
 
                 return action;
             }
+        }
+
+        public DrawAction GetActionById(string actionId)
+        {
+            if (string.IsNullOrEmpty(actionId)) return null;
+            lock (_lock) { return _actionMap.TryGetValue(actionId, out var a) ? a : null; }
         }
 
         public bool CanUndo(int userId)

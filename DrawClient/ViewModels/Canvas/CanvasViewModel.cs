@@ -43,6 +43,8 @@ namespace DrawClient.ViewModels
         public Action GoBackToLobby;
         public UndoRedoManager UndoRedoManager { get; private set; } = new UndoRedoManager();
         public event Action OnUndoRedo;
+        public event Action<DrawAction, bool> OnTransformUndoRedo;
+        public Action GoToLogin { get; set; }
         private bool _isCleanedUp = false;
         // Replay/Play events - View subscribes to render each step
         public event Action<DrawMessage> OnReplayDraw;
@@ -213,6 +215,7 @@ namespace DrawClient.ViewModels
         public ICommand AccountManagerCommand { get; }
         public ICommand SelectToolCommand { get; }
         public ICommand ChooseColorCommand { get; }
+        public ICommand ChooseTextColorCommand { get; }
         public ICommand ClearCanvasCommand { get; }
         public ICommand ToggleColorMenuCommand { get; }
         public ICommand TogglePenMenuCommand { get; }
@@ -225,6 +228,7 @@ namespace DrawClient.ViewModels
         public ICommand RedoCommand { get; }
         public ICommand ClearHistoryCommand { get; }
         public ICommand PlayCommand { get; }
+        public ICommand LogoutCommand { get; }
 
         public ICommand SendChatMessageCommand { get; }
 
@@ -289,6 +293,16 @@ namespace DrawClient.ViewModels
                 }
             });
 
+            ChooseTextColorCommand = new RelayCommand(_ =>
+            {
+                var dlg = new System.Windows.Forms.ColorDialog();
+                if (dlg.ShowDialog() == System.Windows.Forms.DialogResult.OK)
+                {
+                    var c = dlg.Color;
+                    Toolbar.CurrentTextColor = $"#{c.R:X2}{c.G:X2}{c.B:X2}";
+                }
+            });
+
             ClearCanvasCommand = new RelayCommand(ExecuteClearCanvas);
             // Undo/Redo
             UpdateHistoryUI();
@@ -297,6 +311,7 @@ namespace DrawClient.ViewModels
             RedoCommand = new RelayCommand(_ => ExecuteRedo(), _ => CanRedo);
             ClearHistoryCommand = new RelayCommand(_ => ExecuteClearHistory());
             PlayCommand = new RelayCommand(_ => TogglePlay());
+            LogoutCommand = new RelayCommand(_ => ExecuteLogout());
 
             string safeUsername =
                 LoginViewModel.CurrentUsername
@@ -521,6 +536,14 @@ namespace DrawClient.ViewModels
                         Toolbar.CurrentPenType = "rectangle";
                     }
                     break;
+                case "text":
+                    CurrentEditingMode = InkCanvasEditingMode.None;
+                    Toolbar.IsPencilSelected = false;
+                    Toolbar.IsEraserSelected = false;
+                    Toolbar.IsShapeSelected = false;
+                    Toolbar.IsTextSelected = true;
+                    break;
+
                 case "ocr":
                     CurrentEditingMode = InkCanvasEditingMode.None;
 
@@ -581,6 +604,14 @@ namespace DrawClient.ViewModels
 
             ClientSocket.Instance.OnConnectionLost -= HandleConnectionLost;
             ClientSocket.Instance.OnConnectionLost += HandleConnectionLost;
+
+            // Nếu HISTORY đã đến trước khi CanvasViewModel subscribe (race condition lúc vào phòng),
+            // replay lại để canvas load được history ngay khi mở.
+            string pendingHistory = ClientSocket.Instance.LastHistoryJson;
+            if (!string.IsNullOrEmpty(pendingHistory))
+            {
+                Task.Run(() => HandleSocketMessage(pendingHistory));
+            }
         }
 
         private void HandleConnectionLost(ConnectionLostArgs args)
@@ -646,6 +677,7 @@ namespace DrawClient.ViewModels
                                     ShapeType = draw.shapeType,
                                     Text = draw.text,
                                     FontSize = draw.fontSize,
+                                    FontFamily = draw.fontFamily,
                                     StrokeGroupId = draw.strokeGroupId
                                 };
                                 if (!string.IsNullOrEmpty(draw.actionId))
@@ -673,16 +705,50 @@ namespace DrawClient.ViewModels
                         InvokeUI(() =>
                         {
                             OnCanvasCleared?.Invoke();
-                            // Render trực tiếp từ message gốc — đầy đủ penType, shapeType, isHighlighter
-                            foreach (var activeMsg in activeMessages)
+                            // Replay active draws AND TRANSFORM_SELECTIONs theo đúng thứ tự thời gian.
+                            // TRANSFORM_SELECTION dùng chỉ số stroke tại thời điểm ghi — cần theo dõi
+                            // danh sách stroke hiện tại để kiểm tra index có còn hợp lệ không.
+                            var activeSet = new HashSet<DrawMessage>(activeMessages);
+                            // Tracks stroke-adding messages in canvas order (mirrors MyCanvas.Strokes)
+                            var currentStrokeList = new List<DrawMessage>();
+
+                            foreach (var h in _rawHistory)
                             {
-                                DispatchDraw(activeMsg);
-                            }
-                            // Áp lại TRANSFORM_SELECTION để nét đã move giữ đúng vị trí
-                            foreach (var h in _rawHistory.Where(h => h.type == "TRANSFORM_SELECTION" && !string.IsNullOrEmpty(h.text)))
-                            {
-                                var json = JsonSerializer.Serialize(new { type = "TRANSFORM_SELECTION", h.text, userId = -1 });
-                                OnSelectionTransformedReceived?.Invoke(json);
+                                if (activeSet.Contains(h))
+                                {
+                                    DispatchDraw(h);
+                                    if (h.type == "DRAW" || h.type == "SHAPE")
+                                        currentStrokeList.Add(h);
+                                }
+                                else if (h.type == "TRANSFORM_SELECTION" && !string.IsNullOrEmpty(h.text))
+                                {
+                                    // Kiểm tra mọi index trong TRANSFORM_SELECTION có map đúng active stroke không
+                                    // tránh trường hợp stroke A bị undo → index 0 chỉ sang stroke B
+                                    bool indexSafe = true;
+                                    try
+                                    {
+                                        var firstPart = h.text.Split('|')[0];
+                                        foreach (var idxStr in firstPart.Split(','))
+                                        {
+                                            if (int.TryParse(idxStr.Trim(), out int idx))
+                                            {
+                                                if (idx < 0 || idx >= currentStrokeList.Count ||
+                                                    !activeSet.Contains(currentStrokeList[idx]))
+                                                {
+                                                    indexSafe = false;
+                                                    break;
+                                                }
+                                            }
+                                        }
+                                    }
+                                    catch { indexSafe = false; }
+
+                                    if (indexSafe)
+                                    {
+                                        var json = JsonSerializer.Serialize(new { type = "TRANSFORM_SELECTION", h.text, userId = -1 });
+                                        OnSelectionTransformedReceived?.Invoke(json);
+                                    }
+                                }
                             }
                         });
 
@@ -731,9 +797,11 @@ namespace DrawClient.ViewModels
                     switch (drawMsg.type)
                     {
                         case "DRAW":
-                            DispatchDraw(drawMsg);
+                            // Own echoed DRAW messages: InkCanvas đã render native stroke rồi,
+                            // không render lại qua DispatchDraw để tránh duplicate stroke.
                             if (drawMsg.userId != ClientSocket.Instance.CurrentUserId)
                             {
+                                DispatchDraw(drawMsg);
                                 var drawAction = new DrawAction(
                                     "DRAW",
                                     new Point(drawMsg.x1, drawMsg.y1),
@@ -782,9 +850,10 @@ namespace DrawClient.ViewModels
                             break;
 
                         case "SHAPE":
-                            DispatchDraw(drawMsg);
+                            // Không render cho own user vì shape đã được preview tại Canvas_MouseMove
                             if (drawMsg.userId != ClientSocket.Instance.CurrentUserId)
                             {
+                                DispatchDraw(drawMsg);
                                 var shapeAction = new DrawAction(
                                     "SHAPE",
                                     new Point(drawMsg.x1, drawMsg.y1),
@@ -814,13 +883,14 @@ namespace DrawClient.ViewModels
                                     new Point(drawMsg.x1, drawMsg.y1),
                                     new Point(drawMsg.x2, drawMsg.y2),
                                     drawMsg.color,
-                                    drawMsg.thickness,
+                                    0,
                                     drawMsg.userId,
                                     drawMsg.username,
                                     RoomId)
                                 {
                                     Text = drawMsg.text,
                                     FontSize = drawMsg.fontSize,
+                                    FontFamily = drawMsg.fontFamily,
                                     StrokeGroupId = drawMsg.strokeGroupId
                                 };
                                 if (!string.IsNullOrEmpty(drawMsg.actionId))
@@ -1094,14 +1164,16 @@ namespace DrawClient.ViewModels
 
             ClientSocket.Instance.Send(msg);
         }
-        public void SendSelectionTransform(string indicesData, Rect oldBounds, Rect newBounds)
+        // childIndicesData: index của TextBlock trong Children.OfType<TextBlock>() (để sync di chuyển text)
+        public void SendSelectionTransform(string indicesData, Rect oldBounds, Rect newBounds, string childIndicesData = "")
         {
-            // Ép kiểu chuỗi dạng InvariantCulture để dùng dấu chấm (.) cho số thực, bất chấp máy dùng Win Tiếng Việt hay Tiếng Anh
+            // Format: "{strokeIndices}|{oldBounds}|{newBounds}|{childIndices}"
             string transformData = string.Format(System.Globalization.CultureInfo.InvariantCulture,
-                "{0}|{1},{2},{3},{4}|{5},{6},{7},{8}",
+                "{0}|{1},{2},{3},{4}|{5},{6},{7},{8}|{9}",
                 indicesData,
                 oldBounds.X, oldBounds.Y, oldBounds.Width, oldBounds.Height,
-                newBounds.X, newBounds.Y, newBounds.Width, newBounds.Height);
+                newBounds.X, newBounds.Y, newBounds.Width, newBounds.Height,
+                childIndicesData ?? "");
 
             ClientSocket.Instance.Send(new DrawMessage
             {
@@ -1112,8 +1184,28 @@ namespace DrawClient.ViewModels
                 text = transformData
             });
         }
-        public void SendText(string text, Point p, double width, double height, double fontSize = 14)
+        public DrawAction SendText(string text, Point p, double width, double height, double fontSize = 14, string fontFamily = null, string color = null)
         {
+            fontFamily = fontFamily ?? Toolbar.CurrentTextFont;
+            color = color ?? Toolbar.CurrentTextColor;
+
+            var textAction = new DrawAction(
+                "TEXT",
+                p,
+                new Point(width, height),
+                color,
+                0,
+                ClientSocket.Instance.CurrentUserId,
+                ClientSocket.Instance.CurrentUsername,
+                RoomId)
+            {
+                Text = text,
+                FontSize = fontSize,
+                FontFamily = fontFamily
+            };
+            UndoRedoManager.AddAction(textAction);
+            UpdateHistoryUI();
+
             var msg = new DrawMessage
             {
                 type = "TEXT",
@@ -1125,10 +1217,14 @@ namespace DrawClient.ViewModels
                 x2 = width,
                 y2 = height,
                 fontSize = fontSize,
-                color = Toolbar.CurrentColor
+                fontFamily = fontFamily,
+                color = color,
+                actionId = textAction.Id,
+                strokeGroupId = textAction.StrokeGroupId
             };
 
             ClientSocket.Instance.Send(msg);
+            return textAction;
         }
         public void SendDeleteText(double x, double y, string textContent)
         {
@@ -1197,6 +1293,36 @@ namespace DrawClient.ViewModels
             GoBackToLobby?.Invoke();
         }
 
+        private void ExecuteLogout()
+        {
+            // Gửi LEAVE trước khi đăng xuất
+            string safeUsername = LoginViewModel.CurrentUsername
+                ?? ClientSocket.Instance.CurrentUsername ?? "Unknown";
+            try
+            {
+                ClientSocket.Instance.Send(new DrawMessage
+                {
+                    type = "LEAVE",
+                    roomId = RoomId,
+                    userId = ClientSocket.Instance.CurrentUserId,
+                    username = safeUsername,
+                });
+            }
+            catch { }
+
+            Cleanup();
+
+            try { ClientSocket.Instance.Disconnect(); } catch { }
+
+            // Xóa thông tin đăng nhập
+            LoginViewModel.CurrentUsername = null;
+
+            IsProfilePopoverVisible = false;
+
+            // Về màn hình đăng nhập
+            GoToLogin?.Invoke();
+        }
+
         private string GetInitials(string username)
         {
             if (string.IsNullOrWhiteSpace(username))
@@ -1237,41 +1363,61 @@ namespace DrawClient.ViewModels
         {
             int userId = ClientSocket.Instance.CurrentUserId;
             var undoneActions = UndoRedoManager.Undo(userId);
-            if (undoneActions != null && undoneActions.Count > 0)
+            if (undoneActions == null) return;
+
+            if (undoneActions.Count > 0)
             {
-                // Gửi MỘT tin UNDO cho cả nhóm nét vẽ (không gửi từng segment)
-                string groupId = undoneActions[0].StrokeGroupId ?? undoneActions[0].Id;
-                ClientSocket.Instance.Send(new DrawMessage
+                if (undoneActions[0].ActionType == "TRANSFORM")
                 {
-                    type = "UNDO",
-                    roomId = RoomId,
-                    userId = userId,
-                    username = ClientSocket.Instance.CurrentUsername,
-                    strokeGroupId = groupId
-                });
-                OnUndoRedo?.Invoke();
-                UpdateHistoryUI();
+                    // Fire TRƯỚC OnUndoRedo để Canvas còn stroke ở vị trí cũ (sau di chuyển)
+                    // → Canvas tính index và gửi reverse TRANSFORM_SELECTION cho các client khác
+                    OnTransformUndoRedo?.Invoke(undoneActions[0], true);
+                }
+                else
+                {
+                    string groupId = undoneActions[0].StrokeGroupId ?? undoneActions[0].Id;
+                    ClientSocket.Instance.Send(new DrawMessage
+                    {
+                        type = "UNDO",
+                        roomId = RoomId,
+                        userId = userId,
+                        username = ClientSocket.Instance.CurrentUsername,
+                        strokeGroupId = groupId
+                    });
+                }
             }
+            OnUndoRedo?.Invoke();
+            UpdateHistoryUI();
         }
 
         private void ExecuteRedo()
         {
             int userId = ClientSocket.Instance.CurrentUserId;
             var redoneActions = UndoRedoManager.Redo(userId);
-            if (redoneActions != null && redoneActions.Count > 0)
+            if (redoneActions == null) return;
+
+            if (redoneActions.Count > 0)
             {
-                string groupId = redoneActions[0].StrokeGroupId ?? redoneActions[0].Id;
-                ClientSocket.Instance.Send(new DrawMessage
+                if (redoneActions[0].ActionType == "TRANSFORM")
                 {
-                    type = "REDO",
-                    roomId = RoomId,
-                    userId = userId,
-                    username = ClientSocket.Instance.CurrentUsername,
-                    strokeGroupId = groupId
-                });
-                OnUndoRedo?.Invoke();
-                UpdateHistoryUI();
+                    // Fire TRƯỚC OnUndoRedo để Canvas tính index đúng rồi gửi reverse transform
+                    OnTransformUndoRedo?.Invoke(redoneActions[0], false);
+                }
+                else
+                {
+                    string groupId = redoneActions[0].StrokeGroupId ?? redoneActions[0].Id;
+                    ClientSocket.Instance.Send(new DrawMessage
+                    {
+                        type = "REDO",
+                        roomId = RoomId,
+                        userId = userId,
+                        username = ClientSocket.Instance.CurrentUsername,
+                        strokeGroupId = groupId
+                    });
+                }
             }
+            OnUndoRedo?.Invoke();
+            UpdateHistoryUI();
         }
 
         private void ApplyUndoFromNetwork(string strokeGroupId, string actionId, int userId)
@@ -1290,7 +1436,7 @@ namespace DrawClient.ViewModels
                     if (!anyUndone)
                     {
                         var undoneList = UndoRedoManager.Undo(userId);
-                        anyUndone = undoneList != null && undoneList.Count > 0;
+                        anyUndone = undoneList != null; // null = không có gì, empty = trimmed
                     }
 
                     if (anyUndone)
@@ -1317,7 +1463,7 @@ namespace DrawClient.ViewModels
                     if (!anyRedone)
                     {
                         var redoneList = UndoRedoManager.Redo(userId);
-                        anyRedone = redoneList != null && redoneList.Count > 0;
+                        anyRedone = redoneList != null;
                     }
 
                     if (anyRedone)

@@ -1154,8 +1154,8 @@
        PopupAnimation="Fade"
        StaysOpen="False">
 
-                        <Border Background="#FFFFFF" 
-            CornerRadius="12" 
+                        <Border Background="#FFFFFF"
+            CornerRadius="12"
             Padding="16" Margin="16"
             Width="220">
                             <Border.Effect>
@@ -1164,29 +1164,35 @@
 
                             <StackPanel>
                                 <TextBlock Text="FONT FAMILY" FontSize="12" FontWeight="Medium" Foreground="#5F6368" Margin="0,0,0,8"/>
-                                <ComboBox SelectedIndex="0" Margin="0,0,0,16" 
-                      Style="{StaticResource MaterialComboBoxStyle}" 
-                      ItemContainerStyle="{StaticResource MaterialComboBoxItemStyle}">
-                                    <ComboBoxItem Content="Roboto"/>
-                                    <ComboBoxItem Content="Inter"/>
-                                    <ComboBoxItem Content="Arial"/>
-                                    <ComboBoxItem Content="Georgia"/>
+                                <ComboBox x:Name="FontFamilyCombo" SelectedIndex="0" Margin="0,0,0,16"
+                                          SelectionChanged="FontFamilyCombo_SelectionChanged"
+                                          Style="{StaticResource MaterialComboBoxStyle}"
+                                          ItemContainerStyle="{StaticResource MaterialComboBoxItemStyle}">
+                                    <ComboBoxItem Tag="Roboto" Content="Roboto"/>
+                                    <ComboBoxItem Tag="Arial" Content="Arial"/>
+                                    <ComboBoxItem Tag="Georgia" Content="Georgia"/>
+                                    <ComboBoxItem Tag="Times New Roman" Content="Times New Roman"/>
+                                    <ComboBoxItem Tag="Courier New" Content="Courier New"/>
                                 </ComboBox>
 
                                 <TextBlock Text="FONT SIZE" FontSize="12" FontWeight="Medium" Foreground="#5F6368" Margin="0,0,0,8"/>
-                                <ComboBox SelectedIndex="2" Margin="0,0,0,16" 
-                      Style="{StaticResource MaterialComboBoxStyle}" 
-                      ItemContainerStyle="{StaticResource MaterialComboBoxItemStyle}">
+                                <ComboBox x:Name="FontSizeCombo" SelectedIndex="2" Margin="0,0,0,16"
+                                          SelectionChanged="FontSizeCombo_SelectionChanged"
+                                          Style="{StaticResource MaterialComboBoxStyle}"
+                                          ItemContainerStyle="{StaticResource MaterialComboBoxItemStyle}">
+                                    <ComboBoxItem Content="10pt"/>
                                     <ComboBoxItem Content="12pt"/>
-                                    <ComboBoxItem Content="14pt"/>
                                     <ComboBoxItem Content="16pt"/>
+                                    <ComboBoxItem Content="20pt"/>
                                     <ComboBoxItem Content="24pt"/>
+                                    <ComboBoxItem Content="36pt"/>
+                                    <ComboBoxItem Content="48pt"/>
                                 </ComboBox>
 
                                 <TextBlock Text="TEXT COLOR" FontSize="12" FontWeight="Medium" Foreground="#5F6368" Margin="0,0,0,8"/>
-                                <Button Command="{Binding ChooseColorCommand}" Style="{StaticResource OutlinedColorButtonStyle}">
+                                <Button Command="{Binding ChooseTextColorCommand}" Style="{StaticResource OutlinedColorButtonStyle}">
                                     <StackPanel Orientation="Horizontal">
-                                        <Border Width="20" Height="20" Background="{Binding CurrentColor, Converter={StaticResource HexToBrushConverter}}" CornerRadius="4" Margin="0,0,8,0" SnapsToDevicePixels="True"/>
+                                        <Border Width="20" Height="20" Background="{Binding Toolbar.CurrentTextColor, Converter={StaticResource HexToBrushConverter}}" CornerRadius="4" Margin="0,0,8,0" SnapsToDevicePixels="True"/>
                                         <TextBlock Text="Choose color" Foreground="#5F6368" VerticalAlignment="Center" FontSize="13"/>
                                     </StackPanel>
                                 </Button>

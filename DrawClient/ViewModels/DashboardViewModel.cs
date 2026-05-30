@@ -169,6 +169,7 @@ namespace DrawClient.ViewModels
                 : LoginViewModel.CurrentUsername.Substring(0, 1).ToUpper();
 
         public Action<string, string, string> GoToCanvas { get; set; }
+        public Action GoToLogin { get; set; }
 
         private DispatcherTimer _refreshTimer;
 
@@ -496,15 +497,15 @@ namespace DrawClient.ViewModels
 
         private void ExecuteLogout(object obj)
         {
-            try
-            {
-                ClientSocket.Instance.Disconnect();
-            }
-            catch
-            {
-            }
+            try { ClientSocket.Instance.Disconnect(); } catch { }
 
-            Application.Current.Shutdown();
+            // Xóa thông tin đăng nhập
+            LoginViewModel.CurrentUsername = null;
+
+            IsProfilePopoverVisible = false;
+
+            // Về màn hình đăng nhập thay vì tắt app
+            GoToLogin?.Invoke();
         }
 
         public event PropertyChangedEventHandler PropertyChanged;

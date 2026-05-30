@@ -25,8 +25,8 @@ namespace DrawServer
         public string shapeType { get; set; }
 
         public string text { get; set; }
-
         public double fontSize { get; set; }
+        public string fontFamily { get; set; }
 
         // Dữ liệu chat
         public string username { get; set; }
