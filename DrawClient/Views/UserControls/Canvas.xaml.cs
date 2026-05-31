@@ -182,30 +182,6 @@ namespace DrawClient.Views.UserControls
         }
         private void MyCanvas_SelectionMoving(object sender, InkCanvasSelectionEditingEventArgs e)
         {
-            // Tính bounds theo cùng cách với newBounds trong SyncSelectionTransform
-            // để scaleX/scaleY = 1.0 khi di chuyển thuần (không resize).
-            // e.OldRectangle có thể bao gồm margin của selection handles → gây scaleX ≠ 1 → sai vị trí sau history load.
-            var sel = MyCanvas.GetSelectedStrokes();
-            bool hasStrokes = sel != null && sel.Count > 0;
-            Rect bounds = hasStrokes ? sel.GetBounds() : Rect.Empty;
-
-            var selElems = MyCanvas.GetSelectedElements();
-            if (selElems != null)
-            {
-                foreach (UIElement el in selElems)
-                {
-                    if (el is TextBlock tb)
-                    {
-                        double l = InkCanvas.GetLeft(tb); if (double.IsNaN(l)) l = 0;
-                        double t = InkCanvas.GetTop(tb);  if (double.IsNaN(t)) t = 0;
-                        tb.Measure(new Size(double.PositiveInfinity, double.PositiveInfinity));
-                        var tbRect = new Rect(l, t, tb.DesiredSize.Width, tb.DesiredSize.Height);
-                        bounds = bounds.IsEmpty ? tbRect : Rect.Union(bounds, tbRect);
-                    }
-                }
-            }
-
-            _oldSelectionBounds = bounds.IsEmpty ? e.OldRectangle : bounds;
         }
 
         private void MyCanvas_SelectionMoved(object sender, EventArgs e)
@@ -335,10 +311,39 @@ namespace DrawClient.Views.UserControls
         private void MyCanvas_SelectionChanged(object sender, EventArgs e)
         {
             var selectedStrokes = MyCanvas.GetSelectedStrokes();
+            var selectedElems = MyCanvas.GetSelectedElements();
+
+            Rect bounds = Rect.Empty;
+
+            // Lấy khung của các nét vẽ mực (nếu có)
             if (selectedStrokes != null && selectedStrokes.Count > 0)
             {
-                // Ghi lại khung tọa độ gốc trước khi kéo đi
-                _oldSelectionBounds = selectedStrokes.GetBounds();
+                bounds = selectedStrokes.GetBounds();
+            }
+
+            // Lấy khung của các khối TextBlock chữ (nếu có)
+            if (selectedElems != null)
+            {
+                foreach (UIElement el in selectedElems)
+                {
+                    if (el is TextBlock tb)
+                    {
+                        double l = InkCanvas.GetLeft(tb);
+                        if (double.IsNaN(l)) l = 0;
+                        double t = InkCanvas.GetTop(tb);
+                        if (double.IsNaN(t)) t = 0;
+
+                        tb.Measure(new Size(double.PositiveInfinity, double.PositiveInfinity));
+                        var tbRect = new Rect(l, t, tb.DesiredSize.Width, tb.DesiredSize.Height);
+                        bounds = bounds.IsEmpty ? tbRect : Rect.Union(bounds, tbRect);
+                    }
+                }
+            }
+
+            // Chốt cứng tọa độ gốc ngay khoảnh khắc vừa chọn xong
+            if (!bounds.IsEmpty)
+            {
+                _oldSelectionBounds = bounds;
             }
         }
 
@@ -375,6 +380,8 @@ namespace DrawClient.Views.UserControls
                 }
             }
             if (newBounds.IsEmpty) return;
+
+            double scaleY = _oldSelectionBounds.Height > 1e-6 ? newBounds.Height / _oldSelectionBounds.Height : 1.0;
 
             if (Math.Abs(newBounds.X - _oldSelectionBounds.X) > 0.1 ||
                 Math.Abs(newBounds.Y - _oldSelectionBounds.Y) > 0.1 ||
@@ -425,6 +432,13 @@ namespace DrawClient.Views.UserControls
                         if (_childToAction.TryGetValue(child, out var affectedAction) &&
                             !affectedActionIds.Contains(affectedAction.Id))
                             affectedActionIds.Add(affectedAction.Id);
+
+                        if (child is TextBlock tb && scaleY > 0 && scaleY != 1.0)
+                        {
+                            tb.FontSize = Math.Max(8, tb.FontSize * scaleY); // Giới hạn font tối thiểu là 8
+                            tb.Width = double.NaN;  // Tháo gông khung giới hạn
+                            tb.Height = double.NaN;
+                        }
                     }
                 }
 
@@ -808,6 +822,13 @@ namespace DrawClient.Views.UserControls
                         if (double.IsNaN(t)) t = 0;
                         InkCanvas.SetLeft(child, l * scaleX + offsetX);
                         InkCanvas.SetTop(child, t * scaleY + offsetY);
+
+                        if (child is TextBlock tb && scaleY > 0 && scaleY != 1.0)
+                        {
+                            tb.FontSize = Math.Max(8, tb.FontSize * scaleY);
+                            tb.Width = double.NaN;
+                            tb.Height = double.NaN;
+                        }
                     }
                 }
             }
@@ -2087,11 +2108,64 @@ namespace DrawClient.Views.UserControls
                         if (!string.IsNullOrEmpty(detectedText))
                         {
                             double calculatedFontSize = height * 0.75;
+                            string fontFam = _viewModel.Toolbar.CurrentTextFont ?? "Roboto";
+                            string color = _viewModel.Toolbar.CurrentTextColor ?? "#000000";
 
-                            _viewModel.SendText(detectedText, new Point(x, y), width, height, calculatedFontSize);
+                            var renderedText = new TextBlock
+                            {
+                                Text = detectedText,
+                                FontSize = calculatedFontSize,
+                                FontFamily = new FontFamily(fontFam),
+                                Foreground = new SolidColorBrush((Color)ColorConverter.ConvertFromString(color)),
+                                Background = Brushes.Transparent,
+                                TextWrapping = TextWrapping.Wrap,
+                                Width = width,
+                                Cursor = Cursors.IBeam
+                            };
 
-                            // Xóa nét vẽ cục bộ tại máy người quét
-                            MyCanvas.Strokes.Erase(new Rect(x, y, width, height));
+                            InkCanvas.SetLeft(renderedText, x);
+                            InkCanvas.SetTop(renderedText, y);
+
+                            MyCanvas.Children.Add(renderedText);
+                            MyCanvas.UpdateLayout();
+
+                            var textAction = _viewModel.SendText(detectedText, new Point(x, y), width, height, calculatedFontSize, fontFam, color);
+                            if (textAction != null)
+                            {
+                                _childToAction[renderedText] = textAction;
+                                _actionIdToChild[textAction.Id] = renderedText;
+                            }
+
+                            Point p1 = new Point(x, y + height / 2.0);
+                            Point p2 = new Point(x + width, y + height / 2.0);
+                            double eraseThickness = height + 10;
+
+                            var eraseAction = new DrawAction("ERASE", p1, p2, "#ERASE", eraseThickness,
+                                ClientSocket.Instance.CurrentUserId, ClientSocket.Instance.CurrentUsername, _viewModel.RoomId)
+                            {
+                                StrokeGroupId = DrawAction.GenerateId()
+                            };
+
+                            _viewModel.UndoRedoManager.AddAction(eraseAction);
+                            _viewModel.UpdateHistoryUI();
+
+                            ClientSocket.Instance.Send(new DrawMessage
+                            {
+                                type = "ERASE",
+                                roomId = _viewModel.RoomId,
+                                userId = ClientSocket.Instance.CurrentUserId,
+                                username = ClientSocket.Instance.CurrentUsername,
+                                x1 = p1.X,
+                                y1 = p1.Y,
+                                x2 = p2.X,
+                                y2 = p2.Y,
+                                thickness = eraseThickness,
+                                color = "#ERASE",
+                                actionId = eraseAction.Id,
+                                strokeGroupId = eraseAction.StrokeGroupId
+                            });
+
+                            MyCanvas.Strokes.Erase(new Point[] { p1, p2 }, new EllipseStylusShape(eraseThickness, eraseThickness));
                         }
                         else
                         {
@@ -2955,8 +3029,11 @@ namespace DrawClient.Views.UserControls
 
             var tbRef = _activeTextBox;
             var wrapRef = _activeTextWrapper;
+            var existingRef = _editingExistingBlock; // Lưu lại tham chiếu khối chữ cũ
+
             _activeTextBox = null;
             _activeTextWrapper = null;
+            _editingExistingBlock = null;
 
             string text = tbRef.Text?.Trim() ?? "";
             double left = InkCanvas.GetLeft(wrapRef);
@@ -2966,8 +3043,56 @@ namespace DrawClient.Views.UserControls
 
             MyCanvas.Children.Remove(wrapRef);
             RemoveTextToolbar();
-            _editingExistingBlock = null;
 
+            // 1. Nếu không thay đổi gì (bấm nhầm rồi thoát), trả lại chữ cũ
+            if (existingRef != null && text == existingRef.Text &&
+                tbRef.FontSize == existingRef.FontSize &&
+                ((SolidColorBrush)tbRef.Foreground).Color == ((SolidColorBrush)existingRef.Foreground).Color)
+            {
+                MyCanvas.Children.Add(existingRef);
+                return;
+            }
+
+            // 2. FIX LỖI LẶP CHỮ: Tạo một nét tẩy ảo bao trùm chữ cũ để xóa nó khỏi Mạng và History
+            if (existingRef != null)
+            {
+                double oldX = InkCanvas.GetLeft(existingRef);
+                double oldY = InkCanvas.GetTop(existingRef);
+                if (double.IsNaN(oldX)) oldX = 0;
+                if (double.IsNaN(oldY)) oldY = 0;
+
+                existingRef.Measure(new Size(double.PositiveInfinity, double.PositiveInfinity));
+                double eW = existingRef.DesiredSize.Width > 0 ? existingRef.DesiredSize.Width : 100;
+                double eH = existingRef.DesiredSize.Height > 0 ? existingRef.DesiredSize.Height : existingRef.FontSize * 2;
+
+                Point p1 = new Point(oldX, oldY + eH / 2.0);
+                Point p2 = new Point(oldX + eW, oldY + eH / 2.0);
+                double eraseThickness = eH + 10;
+
+                var eraseAction = new DrawAction("ERASE", p1, p2, "#ERASE", eraseThickness,
+                    ClientSocket.Instance.CurrentUserId, ClientSocket.Instance.CurrentUsername, _viewModel.RoomId)
+                { StrokeGroupId = DrawAction.GenerateId() };
+
+                _viewModel.UndoRedoManager.AddAction(eraseAction);
+
+                ClientSocket.Instance.Send(new DrawMessage
+                {
+                    type = "ERASE",
+                    roomId = _viewModel.RoomId,
+                    userId = ClientSocket.Instance.CurrentUserId,
+                    username = ClientSocket.Instance.CurrentUsername,
+                    x1 = p1.X,
+                    y1 = p1.Y,
+                    x2 = p2.X,
+                    y2 = p2.Y,
+                    thickness = eraseThickness,
+                    color = "#ERASE",
+                    actionId = eraseAction.Id,
+                    strokeGroupId = eraseAction.StrokeGroupId
+                });
+            }
+
+            // 3. Render khối chữ mới đã qua chỉnh sửa
             if (!string.IsNullOrWhiteSpace(text))
             {
                 double fontSize = tbRef.FontSize;
@@ -2989,6 +3114,7 @@ namespace DrawClient.Views.UserControls
                 InkCanvas.SetLeft(rendered, left);
                 InkCanvas.SetTop(rendered, top);
                 MyCanvas.Children.Add(rendered);
+                MyCanvas.UpdateLayout(); // Ép WPF cập nhật để Select Tool nhận diện được ngay
 
                 var textAction = _viewModel.SendText(text, new Point(left, top), 0, 0, fontSize, fontFam, color);
                 if (textAction != null)
@@ -3309,7 +3435,12 @@ namespace DrawClient.Views.UserControls
                                 double t = InkCanvas.GetTop(tb);  if (double.IsNaN(t)) t = 0;
                                 InkCanvas.SetLeft(tb, l * scaleX + offsetX);
                                 InkCanvas.SetTop(tb,  t * scaleY + offsetY);
-
+                                if (scaleY > 0 && scaleY != 1.0)
+                                {
+                                    tb.FontSize = Math.Max(8, tb.FontSize * scaleY);
+                                    tb.Width = double.NaN;
+                                    tb.Height = double.NaN;
+                                }
                                 // Lưu actionId thay vì index để ổn định sau rebuild
                                 if (_childToAction.TryGetValue(tb, out var textAct) &&
                                     !ntEntry.TextActionIds.Contains(textAct.Id))

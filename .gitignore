@@ -20,3 +20,5 @@ Release/
 
 !/MasterServer/appsettings.Example.json
 /README.md
+/DrawClient/config.ini
+/DrawServer/config.ini
