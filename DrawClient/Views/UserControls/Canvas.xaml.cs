@@ -692,17 +692,27 @@ namespace DrawClient.Views.UserControls
                     _actionIdToStroke[firstAct.Id] = stroke;
                 }
 
-                // ── Phase 2: Apply tất cả TRANSFORM action không-undone theo thứ tự ────────
-                foreach (var action in allActions)
+                // ── Phase 2+3: Apply TRANSFORM — unsubscribe SelectionMoved/Resized trước ──────
+                // coll.Transform() trên stroke đang selected có thể kích SelectionResized →
+                // SyncSelectionTransform → tạo TRANSFORM spurious → làm hỏng undo/redo stack.
+                MyCanvas.SelectionMoved -= MyCanvas_SelectionMoved;
+                MyCanvas.SelectionResized -= MyCanvas_SelectionResized;
+                try
                 {
-                    if (action.IsUndone || action.ActionType != "TRANSFORM") continue;
-                    ApplyTransformActionToCanvas(action);
-                }
+                    foreach (var action in allActions)
+                    {
+                        if (action.IsUndone || action.ActionType != "TRANSFORM") continue;
+                        ApplyTransformActionToCanvas(action);
+                    }
 
-                // ── Phase 3: Tái áp dụng các network TRANSFORM_SELECTION đã nhận ────────────
-                // (vì chúng không nằm trong UndoRedoManager nên Phase 2 không xử lý)
-                foreach (var nt in _activeNetworkTransforms)
-                    ApplyNetworkTransformEntry(nt);
+                    foreach (var nt in _activeNetworkTransforms)
+                        ApplyNetworkTransformEntry(nt);
+                }
+                finally
+                {
+                    MyCanvas.SelectionMoved += MyCanvas_SelectionMoved;
+                    MyCanvas.SelectionResized += MyCanvas_SelectionResized;
+                }
 
                 // ── Phase 4: Apply ERASE sau tất cả TRANSFORM ────────────────────────────────
                 // Stroke đã ở đúng vị trí sau Phase 2+3; ERASE mới xóa đúng chỗ (kể cả stroke đã move).
