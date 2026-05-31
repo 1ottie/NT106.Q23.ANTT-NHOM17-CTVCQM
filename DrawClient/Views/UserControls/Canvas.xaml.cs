@@ -182,9 +182,30 @@ namespace DrawClient.Views.UserControls
         }
         private void MyCanvas_SelectionMoving(object sender, InkCanvasSelectionEditingEventArgs e)
         {
-            // e.OldRectangle bao gồm cả strokes lẫn UIElement children (TextBlock) →
-            // đúng hơn GetSelectedStrokes().GetBounds() khi chỉ có text được chọn.
-            _oldSelectionBounds = e.OldRectangle;
+            // Tính bounds theo cùng cách với newBounds trong SyncSelectionTransform
+            // để scaleX/scaleY = 1.0 khi di chuyển thuần (không resize).
+            // e.OldRectangle có thể bao gồm margin của selection handles → gây scaleX ≠ 1 → sai vị trí sau history load.
+            var sel = MyCanvas.GetSelectedStrokes();
+            bool hasStrokes = sel != null && sel.Count > 0;
+            Rect bounds = hasStrokes ? sel.GetBounds() : Rect.Empty;
+
+            var selElems = MyCanvas.GetSelectedElements();
+            if (selElems != null)
+            {
+                foreach (UIElement el in selElems)
+                {
+                    if (el is TextBlock tb)
+                    {
+                        double l = InkCanvas.GetLeft(tb); if (double.IsNaN(l)) l = 0;
+                        double t = InkCanvas.GetTop(tb);  if (double.IsNaN(t)) t = 0;
+                        tb.Measure(new Size(double.PositiveInfinity, double.PositiveInfinity));
+                        var tbRect = new Rect(l, t, tb.DesiredSize.Width, tb.DesiredSize.Height);
+                        bounds = bounds.IsEmpty ? tbRect : Rect.Union(bounds, tbRect);
+                    }
+                }
+            }
+
+            _oldSelectionBounds = bounds.IsEmpty ? e.OldRectangle : bounds;
         }
 
         private void MyCanvas_SelectionMoved(object sender, EventArgs e)
