@@ -918,7 +918,8 @@ namespace DrawClient.ViewModels
                             // Không render cho own user vì shape đã được preview tại Canvas_MouseMove
                             if (drawMsg.userId != ClientSocket.Instance.CurrentUserId)
                             {
-                                DispatchDraw(drawMsg);
+                                // Thêm vào UndoRedoManager TRƯỚC DispatchDraw để DrawShape có thể
+                                // tìm action qua GetActionById và set _actionIdToStroke đúng.
                                 var shapeAction = new DrawAction(
                                     "SHAPE",
                                     new Point(drawMsg.x1, drawMsg.y1),
@@ -935,6 +936,7 @@ namespace DrawClient.ViewModels
                                 if (!string.IsNullOrEmpty(drawMsg.actionId))
                                     shapeAction.Id = drawMsg.actionId;
                                 UndoRedoManager.AddAction(shapeAction);
+                                DispatchDraw(drawMsg);
                                 UpdateHistoryUI();
                             }
                             break;
@@ -1609,7 +1611,7 @@ namespace DrawClient.ViewModels
                     int delayMs = 50;
                     if (action.type == "DRAW" || action.type == "ERASE")
                         delayMs = 30;
-                    else if (action.type == "SHAPE" || action.type == "TEXT")
+                    else if (action.type == "SHAPE" || action.type == "TEXT" || action.type == "TRANSFORM_SELECTION")
                         delayMs = 100;
                     else if (action.type == "UNDO" || action.type == "REDO")
                         delayMs = 200;
@@ -1679,6 +1681,15 @@ namespace DrawClient.ViewModels
                             OnReplayClear?.Invoke();
                             actionMap.Clear();
                             undoStack.Clear();
+                            break;
+
+                        case "TRANSFORM_SELECTION":
+                            if (!string.IsNullOrEmpty(action.text))
+                            {
+                                string replayTransformJson = JsonSerializer.Serialize(
+                                    new { type = "TRANSFORM_SELECTION", action.text, userId = -1 });
+                                InvokeUI(() => OnSelectionTransformedReceived?.Invoke(replayTransformJson));
+                            }
                             break;
                     }
 

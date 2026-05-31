@@ -440,7 +440,10 @@ namespace DrawClient.Views.UserControls
                 {
                     string groupId = null;
                     if (_strokeToAction.TryGetValue(stroke, out var act))
-                        groupId = act.StrokeGroupId;
+                    {
+                        // SHAPE strokes: remote maps _actionIdToStroke[act.Id], not act.StrokeGroupId
+                        groupId = (act.ActionType == "SHAPE") ? act.Id : act.StrokeGroupId;
+                    }
                     else
                     {
                         foreach (var kvp in _networkGroupStrokes)
@@ -596,7 +599,8 @@ namespace DrawClient.Views.UserControls
 
                 foreach (var action in allActions)
                 {
-                    if (action.IsUndone || action.ActionType == "TRANSFORM") continue;
+                    // ERASE được xử lý ở Phase 4 (sau TRANSFORM) để erase đúng vị trí stroke đã di chuyển.
+                    if (action.IsUndone || action.ActionType == "TRANSFORM" || action.ActionType == "ERASE") continue;
 
                     if (action.ActionType == "DRAW" && !string.IsNullOrEmpty(action.StrokeGroupId))
                     {
@@ -699,6 +703,14 @@ namespace DrawClient.Views.UserControls
                 // (vì chúng không nằm trong UndoRedoManager nên Phase 2 không xử lý)
                 foreach (var nt in _activeNetworkTransforms)
                     ApplyNetworkTransformEntry(nt);
+
+                // ── Phase 4: Apply ERASE sau tất cả TRANSFORM ────────────────────────────────
+                // Stroke đã ở đúng vị trí sau Phase 2+3; ERASE mới xóa đúng chỗ (kể cả stroke đã move).
+                foreach (var action in allActions)
+                {
+                    if (action.IsUndone || action.ActionType != "ERASE") continue;
+                    DrawSingleAction(action);
+                }
             });
         }
 
@@ -717,6 +729,10 @@ namespace DrawClient.Views.UserControls
                     var coll = new StrokeCollection();
                     foreach (var s in strokes) coll.Add(s);
                     coll.Transform(nt.Matrix, false);
+                }
+                else if (_actionIdToStroke.TryGetValue(gid, out var actionStroke) && MyCanvas.Strokes.Contains(actionStroke))
+                {
+                    new StrokeCollection { actionStroke }.Transform(nt.Matrix, false);
                 }
             }
             foreach (var aid in nt.TextActionIds)
@@ -786,7 +802,6 @@ namespace DrawClient.Views.UserControls
         {
             if (_viewModel == null || transformAction == null) return;
 
-            // Tìm các strokes bị ảnh hưởng đang hiện trên canvas
             var affectedStrokes = new List<Stroke>();
             var affectedIds = new HashSet<string>(transformAction.AffectedActionIds ?? new List<string>());
             var affectedGroups = new HashSet<string>(transformAction.AffectedStrokeGroupIds ?? new List<string>());
@@ -813,15 +828,28 @@ namespace DrawClient.Views.UserControls
                 }
             }
 
-            if (affectedStrokes.Count == 0) return;
+            // Thu thập TextBlock bị ảnh hưởng để sync undo/redo cho text
+            var allTextBlocks = MyCanvas.Children.OfType<TextBlock>().ToList();
+            var affectedTextIndices = new List<int>();
+            foreach (var affId in affectedIds)
+            {
+                if (_actionIdToChild.TryGetValue(affId, out var child) && child is TextBlock tb)
+                {
+                    int ci = allTextBlocks.IndexOf(tb);
+                    if (ci >= 0) affectedTextIndices.Add(ci);
+                }
+            }
+
+            if (affectedStrokes.Count == 0 && affectedTextIndices.Count == 0) return;
 
             // Dùng G:groupId thay vì index để sync undo/redo transform đúng trên các client
+            // SHAPE strokes dùng act.Id vì remote map _actionIdToStroke[act.Id]
             var identifiers = new List<string>();
             foreach (var s in affectedStrokes)
             {
                 string groupId = null;
                 if (_strokeToAction.TryGetValue(s, out var act))
-                    groupId = act.StrokeGroupId;
+                    groupId = (act.ActionType == "SHAPE") ? act.Id : act.StrokeGroupId;
                 else
                 {
                     foreach (var kvp in _networkGroupStrokes)
@@ -838,7 +866,7 @@ namespace DrawClient.Views.UserControls
                     if (fallbackIdx >= 0) identifiers.Add(fallbackIdx.ToString());
                 }
             }
-            if (identifiers.Count == 0) return;
+            if (identifiers.Count == 0 && affectedTextIndices.Count == 0) return;
 
             // Reverse: nếu undo thì gửi newBounds→oldBounds, nếu redo thì gửi oldBounds→newBounds
             Rect oldB, newB;
@@ -857,7 +885,8 @@ namespace DrawClient.Views.UserControls
                                 transformAction.TransformNewW, transformAction.TransformNewH);
             }
 
-            _viewModel.SendSelectionTransform(string.Join(",", identifiers), oldB, newB);
+            string childData = affectedTextIndices.Count > 0 ? string.Join(",", affectedTextIndices) : "";
+            _viewModel.SendSelectionTransform(string.Join(",", identifiers), oldB, newB, childData);
         }
 
         #region Replay/Play Handlers
@@ -2549,6 +2578,17 @@ namespace DrawClient.Views.UserControls
 
                 MyCanvas.Children.Add(tb);
 
+                // Map TextBlock tới action để SyncSelectionTransform và ApplyTransformActionToCanvas hoạt động đúng
+                if (!string.IsNullOrEmpty(msg.actionId) && _viewModel != null)
+                {
+                    var textAct = _viewModel.UndoRedoManager.GetActionById(msg.actionId);
+                    if (textAct != null)
+                    {
+                        _childToAction[tb] = textAct;
+                        _actionIdToChild[textAct.Id] = tb;
+                    }
+                }
+
                 if (msg.x2 > 0 && msg.y2 > 0)
                 {
                     MyCanvas.Strokes.Erase(new Rect(msg.x1, msg.y1, msg.x2, msg.y2));
@@ -2918,7 +2958,10 @@ namespace DrawClient.Views.UserControls
 
                 var textAction = _viewModel.SendText(text, new Point(left, top), 0, 0, fontSize, fontFam, color);
                 if (textAction != null)
+                {
                     _childToAction[rendered] = textAction;
+                    _actionIdToChild[textAction.Id] = rendered;
+                }
             }
         }
 

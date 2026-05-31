@@ -59,10 +59,9 @@ namespace DrawClient.Services
                 if (_undoGroupStacks[uid].Count == 0 || _undoGroupStacks[uid].Peek() != groupId)
                     _undoGroupStacks[uid].Push(groupId);
 
-                // TRANSFORM actions (local move/resize) không xóa redo stack —
-                // cho phép vẫn redo draw sau khi undo draw rồi move thứ khác.
-                if (action.ActionType != "TRANSFORM")
-                    _redoGroupStacks[uid].Clear();
+                // Bất kỳ action mới nào (kể cả TRANSFORM/di chuyển) đều xóa redo stack
+                // để nội dung mới nhất luôn là trạng thái hiện tại, không có redo.
+                _redoGroupStacks[uid].Clear();
 
                 // Trim history
                 if (_allActions.Count > MAX_HISTORY)
