@@ -3053,7 +3053,7 @@ namespace DrawClient.Views.UserControls
                 return;
             }
 
-            // 2. FIX LỖI LẶP CHỮ: Tạo một nét tẩy ảo bao trùm chữ cũ để xóa nó khỏi Mạng và History
+            // 2. Xóa chữ cũ khỏi các máy khác qua DELETE_TEXT (đúng cơ chế, không dùng ERASE vì ERASE không xóa được TextBlock)
             if (existingRef != null)
             {
                 double oldX = InkCanvas.GetLeft(existingRef);
@@ -3061,35 +3061,7 @@ namespace DrawClient.Views.UserControls
                 if (double.IsNaN(oldX)) oldX = 0;
                 if (double.IsNaN(oldY)) oldY = 0;
 
-                existingRef.Measure(new Size(double.PositiveInfinity, double.PositiveInfinity));
-                double eW = existingRef.DesiredSize.Width > 0 ? existingRef.DesiredSize.Width : 100;
-                double eH = existingRef.DesiredSize.Height > 0 ? existingRef.DesiredSize.Height : existingRef.FontSize * 2;
-
-                Point p1 = new Point(oldX, oldY + eH / 2.0);
-                Point p2 = new Point(oldX + eW, oldY + eH / 2.0);
-                double eraseThickness = eH + 10;
-
-                var eraseAction = new DrawAction("ERASE", p1, p2, "#ERASE", eraseThickness,
-                    ClientSocket.Instance.CurrentUserId, ClientSocket.Instance.CurrentUsername, _viewModel.RoomId)
-                { StrokeGroupId = DrawAction.GenerateId() };
-
-                _viewModel.UndoRedoManager.AddAction(eraseAction);
-
-                ClientSocket.Instance.Send(new DrawMessage
-                {
-                    type = "ERASE",
-                    roomId = _viewModel.RoomId,
-                    userId = ClientSocket.Instance.CurrentUserId,
-                    username = ClientSocket.Instance.CurrentUsername,
-                    x1 = p1.X,
-                    y1 = p1.Y,
-                    x2 = p2.X,
-                    y2 = p2.Y,
-                    thickness = eraseThickness,
-                    color = "#ERASE",
-                    actionId = eraseAction.Id,
-                    strokeGroupId = eraseAction.StrokeGroupId
-                });
+                _viewModel.SendDeleteText(oldX, oldY, existingRef.Text);
             }
 
             // 3. Render khối chữ mới đã qua chỉnh sửa
