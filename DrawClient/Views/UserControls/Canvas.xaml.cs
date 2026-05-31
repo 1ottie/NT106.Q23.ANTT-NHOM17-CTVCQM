@@ -1036,6 +1036,9 @@ namespace DrawClient.Views.UserControls
                     {
                         _replayStrokeMap[msg.actionId] = stroke;
                         _replayActionMap[msg.actionId] = msg;
+                        // Cần thiết để HandleRemoteSelectionTransform tìm được stroke
+                        // khi xử lý TRANSFORM_SELECTION trong quá trình replay.
+                        _actionIdToStroke[msg.actionId] = stroke;
                     }
                 }
                 catch { }
