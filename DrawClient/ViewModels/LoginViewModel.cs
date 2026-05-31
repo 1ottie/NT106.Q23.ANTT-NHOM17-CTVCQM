@@ -5,6 +5,7 @@ using System.Text.Json;
 using System.Threading.Tasks;
 using System.Windows;
 using System.Windows.Input;
+using DrawClient.Helpers;
 using DrawClient.Models;
 
 namespace DrawClient.ViewModels
@@ -44,7 +45,7 @@ namespace DrawClient.ViewModels
                 var loginReq = new
                 {
                     username = Username,
-                    password = Password
+                    password = SecurityHelper.HashPassword(Password)
                 };
 
                 string json = JsonSerializer.Serialize(loginReq);
@@ -62,9 +63,7 @@ namespace DrawClient.ViewModels
                 var options = new JsonSerializerOptions { PropertyNameCaseInsensitive = true };
                 var result = JsonSerializer.Deserialize<LoginResponse>(responseJson, options);
 
-                if (result == null || result.user == null) return;
-
-                if (string.IsNullOrEmpty(result.token))
+                if (result == null || string.IsNullOrEmpty(result.token))
                 {
                     MessageBox.Show("Login thất bại: Server không trả về token.");
                     return;
@@ -72,8 +71,8 @@ namespace DrawClient.ViewModels
 
                 // Lưu dữ liệu Auth
                 Token = result.token;
-                CurrentUserId = result.user.user_id;
-                CurrentUsername = result.user.username ?? Username;
+                CurrentUserId = SecurityHelper.ParseUserIdFromToken(result.token);
+                CurrentUsername = result.username ?? Username;
 
                 // Gán cho socket
                 ClientSocket.Instance.CurrentUserId = CurrentUserId;

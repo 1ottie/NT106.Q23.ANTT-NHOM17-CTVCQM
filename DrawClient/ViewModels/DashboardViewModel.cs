@@ -13,6 +13,7 @@ using System.Threading.Tasks;
 using System.ComponentModel;
 using System.Runtime.CompilerServices;
 using System.Windows.Threading;
+using DrawClient.Helpers;
 
 namespace DrawClient.ViewModels
 {
@@ -23,7 +24,6 @@ namespace DrawClient.ViewModels
         public int max_users { get; set; }
         public bool is_private { get; set; }
         public int player_count { get; set; }
-        public NodeInfo node { get; set; }
 
         public string Id => room_id.ToString();
         public string Name => room_name;
@@ -298,7 +298,7 @@ namespace DrawClient.ViewModels
                     password =
                         string.IsNullOrWhiteSpace(NewRoomPassword)
                             ? null
-                            : NewRoomPassword,
+                            : SecurityHelper.HashPassword(NewRoomPassword),
                     node_id = 1,
                     max_users = 10
                 };
@@ -335,7 +335,7 @@ namespace DrawClient.ViewModels
 
                     if (createdRoomId > 0)
                     {
-                        await CallJoinApi(createdRoomId, newRoomReq.password);
+                        await CallJoinApi(createdRoomId, string.IsNullOrWhiteSpace(NewRoomPassword) ? null : NewRoomPassword);
                         await LoadRooms();
                     }
                     else
@@ -425,7 +425,7 @@ namespace DrawClient.ViewModels
                 var joinReq = new
                 {
                     room_id = roomId,
-                    password = password
+                    password = string.IsNullOrEmpty(password) ? null : SecurityHelper.HashPassword(password)
                 };
 
                 string jsonString =

@@ -4,6 +4,7 @@ using System.Text;
 using System.Text.Json;
 using System.Windows;
 using System.Windows.Controls;
+using DrawClient.Helpers;
 using DrawClient.ViewModels;
 
 namespace DrawClient.Views
@@ -70,7 +71,7 @@ namespace DrawClient.Views
 
                 if (isLoginMode)
                 {
-                    payload = new { username = username, password = password };
+                    payload = new { username = username, password = SecurityHelper.HashPassword(password) };
                 }
                 else
                 {
@@ -80,7 +81,7 @@ namespace DrawClient.Views
                         btnSubmit.IsEnabled = true;
                         return;
                     }
-                    payload = new { username = username, password = password, email = email };
+                    payload = new { username = username, password = SecurityHelper.HashPassword(password), email = email };
                 }
 
                 string jsonPayload = JsonSerializer.Serialize(payload);
@@ -100,11 +101,7 @@ namespace DrawClient.Views
                                    .GetProperty("token")
                                    .GetString();
 
-                            int userId =
-                                doc.RootElement
-                                   .GetProperty("user")
-                                   .GetProperty("user_id")
-                                   .GetInt32();
+                            int userId = SecurityHelper.ParseUserIdFromToken(token);
 
                             LoginViewModel.Token = token;
 
@@ -112,7 +109,6 @@ namespace DrawClient.Views
 
                             ClientSocket.Instance.CurrentUserId = userId;
 
-                            // BỔ SUNG: Cập nhật username ngay khi đăng nhập thành công
                             LoginViewModel.CurrentUsername = username;
                             ClientSocket.Instance.CurrentUsername = username;
 

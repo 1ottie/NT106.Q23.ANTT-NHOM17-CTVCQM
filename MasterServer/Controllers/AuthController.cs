@@ -43,15 +43,10 @@ public class AuthController : ControllerBase
         Console.WriteLine($"[MASTER - AUTH] ĐĂNG NHẬP THÀNH CÔNG -> User ID: {user.user_id} | Email: {user.email}");
         Console.ResetColor();
 
-        return Ok(new
+        return Ok(new LoginResponseDto
         {
             token = token,
-            user = new
-            {
-                user.user_id,
-                user.username,
-                user.email
-            }
+            username = user.username
         });
     }
     [HttpGet("test-db")]

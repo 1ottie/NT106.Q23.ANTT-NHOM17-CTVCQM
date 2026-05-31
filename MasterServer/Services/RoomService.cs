@@ -39,6 +39,9 @@ public class RoomService
             throw new Exception("Node not available");
 
         // 2. Xử lý mật khẩu
+        if (!string.IsNullOrEmpty(req.password))
+            req.is_private = true;
+
         string hash = null;
         if (req.is_private)
         {
@@ -77,7 +80,6 @@ public class RoomService
             room_id = room.room_id,
             room_name = room.room_name,
             is_private = room.is_private,
-            password = req.password,
             max_users = room.max_users,
             created_at = room.created_at,
             node = new
@@ -162,15 +164,14 @@ public class RoomService
         LEFT JOIN Nodes n ON r.node_id = n.node_id
         ORDER BY r.created_at DESC").ToList();
 
-        return rooms.Select(r => new
+        return rooms.Select(r => new RoomListDto
         {
-            room_id = r.room_id,
-            room_name = r.room_name,
-            is_private = r.is_private,
-            max_users = r.max_users,
-            created_at = r.created_at,
-            player_count = r.player_count,
-            node = new { node_id = r.node_id, ip = r.ip_address, port = r.port }
+            room_id = Convert.ToInt32(r.room_id),
+            room_name = (string)r.room_name,
+            is_private = Convert.ToBoolean(r.is_private),
+            max_users = Convert.ToInt32(r.max_users),
+            created_at = (DateTime)r.created_at,
+            player_count = Convert.ToInt32(r.player_count)
         }).ToList();
     }
 

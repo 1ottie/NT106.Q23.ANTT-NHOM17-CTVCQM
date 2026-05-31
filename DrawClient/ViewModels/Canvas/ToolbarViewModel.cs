@@ -4,6 +4,7 @@ using System.Runtime.CompilerServices;
 using System.Windows.Input;
 using System.Windows.Media;
 using System.Collections.ObjectModel;
+using DrawClient.ViewModels;
 
 namespace DrawClient.ViewModels.Canvas
 {

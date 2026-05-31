@@ -1,107 +1,81 @@
-# Hướng Dẫn Đổi IP/Port Khi Chuyển Mạng LAN
+# Hướng dẫn kết nối Demo — LAN & Internet
 
-## IP Hiện Tại: `10.45.27.103`
+## Yêu cầu
 
-Khi chuyển sang mạng LAN khác, **chỉ cần sửa 2 file `config.ini`** rồi chạy lại — **KHÔNG cần build lại**.
-
----
-
-## Bước 1 — Lấy IP mới
-
-Trên **máy chủ** (máy chạy MySQL + MasterServer + DrawServer), mở CMD:
-```
-ipconfig
-```
-Tìm dòng `IPv4 Address` trong card mạng đang dùng (Wi-Fi hoặc Ethernet).  
-Ví dụ kết quả: `10.95.48.92`
+- Máy chủ cần chạy **MasterServer** và **DrawServer** trước khi client kết nối
+- MySQL đang chạy trên máy server
 
 ---
 
-## Bước 2 — Sửa file cấu hình (không cần build lại)
+## Chế độ LAN (cùng mạng WiFi)
 
-### File 1: `DrawClient/config.ini`  
-> Sao chép file này kèm theo `DrawClient.exe` cho **máy khách**.
+### Máy SERVER:
 
+```powershell
+.\restore-lan.ps1
+```
+
+Sau đó trong Visual Studio: **Rebuild DrawServer** → Start MasterServer → Start DrawServer
+
+### Máy CLIENT (bạn bè):
+
+Sửa `DrawClient/config.ini`:
 ```ini
 [Server]
-MasterServerIp=10.95.48.92   # <-- đổi thành IP mới
+MasterServerIp=192.168.2.6
 MasterServerPort=5274
 ```
 
+> Kiểm tra IP máy server bằng `ipconfig` nếu IP khác
+
 ---
 
-### File 2: `DrawServer/config.ini`  
-> Đặt file này cạnh `DrawServer.exe` trên **máy chủ**.
+## Chế độ Internet (khác mạng, dùng serveo.net)
 
+### Máy SERVER:
+
+**Bước 1** — Mở PowerShell tại thư mục project, chạy:
+```powershell
+.\start-internet.ps1
+```
+Script tự mở 2 cửa sổ SSH tunnel và cập nhật config.
+
+**Bước 2** — Chờ 2 cửa sổ SSH hiện thông báo:
+```
+Forwarding TCP connections from tcp://serveo.net:5274
+Forwarding TCP connections from tcp://serveo.net:6001
+```
+
+**Bước 3** — Trong Visual Studio: **Rebuild DrawServer** → Start MasterServer → Start DrawServer
+
+### Máy CLIENT (bạn bè):
+
+Sửa `DrawClient/config.ini`:
 ```ini
 [Server]
-NodeIp=10.95.48.92           # <-- IP của máy đang chạy DrawServer
-NodePort=6001
-MasterServerIp=10.95.48.92   # <-- IP của máy đang chạy MasterServer
+MasterServerIp=serveo.net
 MasterServerPort=5274
-
-[Database]
-DbConnectionString=server=localhost;database=online_Drawing_DB;user=root;password=182806
 ```
 
-> Nếu MasterServer và DrawServer chạy **cùng 1 máy** thì `NodeIp` = `MasterServerIp` = IP của máy đó.
+Chạy `DrawClient.exe` → kết nối được qua Internet.
 
 ---
 
-## Vị trí file config.ini sau khi build
+## Quay về LAN sau khi demo Internet
 
-| Dự án | Vị trí `config.ini` |
-|-------|---------------------|
-| DrawClient | `DrawClient\bin\Release\config.ini` (hoặc `bin\Debug\`) |
-| DrawServer | `DrawServer\bin\Release\config.ini` (hoặc `bin\Debug\`) |
-
-File này được tự động copy vào thư mục output mỗi khi build.  
-Khi phát hành cho máy khách, copy toàn bộ thư mục `bin\Release\` — file `config.ini` đã có sẵn ở đó.
-
----
-
-## Bước 3 — Chạy lại (không cần build)
-
-Chỉ cần **sửa file `config.ini`** và chạy lại exe. Không cần mở Visual Studio.
-
----
-
-## Thứ Tự Khởi Động
-
-1. Khởi động **MySQL** trên máy chủ
-2. Chạy **MasterServer** (`dotnet run` hoặc exe publish)
-3. Chạy **DrawServer** (`DrawServer.exe`)
-4. Chạy **DrawClient** trên các máy khách
-
----
-
-## Cấu Trúc Hệ Thống
-
-```
-Máy chủ (ví dụ IP: 10.95.48.92)
-├── MySQL              :3306  ← database
-├── MasterServer       :5274  ← Web API (HTTP)
-└── DrawServer         :6001  ← Socket vẽ (TCP)
-
-Máy khách (bất kỳ IP nào trong LAN)
-└── DrawClient
-    └── config.ini: MasterServerIp=10.95.48.92
+```powershell
+.\restore-lan.ps1
 ```
 
----
-
-## Mở Firewall (chỉ làm 1 lần trên máy chủ)
-
-Chạy CMD với quyền **Admin**:
-```bat
-netsh advfirewall firewall add rule name="MasterServer" dir=in action=allow protocol=TCP localport=5274
-netsh advfirewall firewall add rule name="DrawServer"   dir=in action=allow protocol=TCP localport=6001
-```
+Rồi **Rebuild DrawServer** và start lại.
 
 ---
 
-## Lưu Ý
+## Lưu ý
 
-- `DbConnectionString` dùng `server=localhost` vì MySQL chạy cùng máy với DrawServer — **không cần đổi**.
-- `MasterServer` lắng nghe trên `0.0.0.0:5274` nên tự động chấp nhận kết nối từ mọi máy trong LAN — **không cần cấu hình thêm**.
-- Nếu `config.ini` không tồn tại, cả DrawClient lẫn DrawServer sẽ dùng IP mặc định `10.45.27.103`.
+| # | Lưu ý |
+|---|---|
+| 1 | Sau mỗi lần đổi chế độ phải **Rebuild DrawServer** |
+| 2 | 2 cửa sổ SSH tunnel phải **giữ mở** suốt thời gian demo |
+| 3 | Nếu SSH tunnel bị đứt → chạy lại `.\start-internet.ps1` |
+| 4 | Kiểm tra server đang chạy: `netstat -an \| findstr "5274 6001"` |
