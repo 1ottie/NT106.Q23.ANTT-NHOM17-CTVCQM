@@ -12,6 +12,7 @@ using System.Windows;
 using System.Threading.Tasks;
 using System.ComponentModel;
 using System.Runtime.CompilerServices;
+using System.Windows.Threading;
 
 namespace DrawClient.ViewModels
 {
@@ -37,7 +38,7 @@ namespace DrawClient.ViewModels
     public class NodeInfo
     {
         public string ip { get; set; }
-        public int port { get; set; }
+        public int? port { get; set; }
     }
     public class RoomConnectionResponse
     {
@@ -64,7 +65,7 @@ namespace DrawClient.ViewModels
 
         // TODO:
         // đổi localhost thành IP server thật nếu chạy nhiều máy
-        private const string BaseUrl = "http://localhost:5274/api/room";
+        private static string BaseUrl => $"http://{LoginViewModel.CurrentMasterIp}:{LoginViewModel.CurrentMasterPort}/api/room";
 
         private string _newRoomName = "My Awesome Room";
 
@@ -131,6 +132,10 @@ namespace DrawClient.ViewModels
         public ICommand JoinManualCommand { get; }
         public ICommand CreateRoomCommand { get; }
         public ICommand RefreshCommand { get; }
+        public ICommand ToggleCreateRoomCommand { get; }
+        public ICommand ToggleJoinRoomCommand { get; }
+        public ICommand ToggleProfilePopoverCommand { get; }
+        public ICommand AccountManagerCommand { get; }
 
         private bool _isProfilePopoverVisible;
 
@@ -144,7 +149,29 @@ namespace DrawClient.ViewModels
             }
         }
 
+        private bool _isCreateRoomVisible = false;
+        public bool IsCreateRoomVisible
+        {
+            get => _isCreateRoomVisible;
+            set { _isCreateRoomVisible = value; OnPropertyChanged(); }
+        }
+
+        private bool _isJoinRoomVisible = false;
+        public bool IsJoinRoomVisible
+        {
+            get => _isJoinRoomVisible;
+            set { _isJoinRoomVisible = value; OnPropertyChanged(); }
+        }
+
+        public string CurrentUserInitials =>
+            string.IsNullOrEmpty(LoginViewModel.CurrentUsername)
+                ? "?"
+                : LoginViewModel.CurrentUsername.Substring(0, 1).ToUpper();
+
         public Action<string, string, string> GoToCanvas { get; set; }
+        public Action GoToLogin { get; set; }
+
+        private DispatcherTimer _refreshTimer;
 
         public LobbyViewModel()
         {
@@ -167,6 +194,27 @@ namespace DrawClient.ViewModels
             LogoutCommand =
                 new RelayCommand(ExecuteLogout);
 
+            ToggleCreateRoomCommand = new RelayCommand(obj =>
+            {
+                IsCreateRoomVisible = !IsCreateRoomVisible;
+                if (IsCreateRoomVisible) IsJoinRoomVisible = false;
+            });
+
+            ToggleJoinRoomCommand = new RelayCommand(obj =>
+            {
+                IsJoinRoomVisible = !IsJoinRoomVisible;
+                if (IsJoinRoomVisible) IsCreateRoomVisible = false;
+            });
+
+            ToggleProfilePopoverCommand = new RelayCommand(obj =>
+                IsProfilePopoverVisible = !IsProfilePopoverVisible);
+
+            AccountManagerCommand = new RelayCommand(obj => { });
+
+            _refreshTimer = new DispatcherTimer { Interval = TimeSpan.FromSeconds(5) };
+            _refreshTimer.Tick += async (s, e) => await LoadRooms(silent: true);
+            _refreshTimer.Start();
+
             _ = LoadRooms();
         }
 
@@ -181,7 +229,7 @@ namespace DrawClient.ViewModels
             }
         }
 
-        public async Task LoadRooms()
+        public async Task LoadRooms(bool silent = false)
         {
             try
             {
@@ -217,7 +265,7 @@ namespace DrawClient.ViewModels
                             Rooms.Sum(r => r.PlayerCount);
                     }
                 }
-                else
+                else if (!silent)
                 {
                     MessageBox.Show(
                         "Không thể tải danh sách phòng.");
@@ -225,9 +273,10 @@ namespace DrawClient.ViewModels
             }
             catch (Exception ex)
             {
-                MessageBox.Show(
-                    "Không thể lấy danh sách phòng: "
-                    + ex.Message);
+                if (!silent)
+                    MessageBox.Show(
+                        "Không thể lấy danh sách phòng: "
+                        + ex.Message);
             }
         }
 
@@ -402,7 +451,7 @@ namespace DrawClient.ViewModels
 
                     var result = JsonSerializer.Deserialize<RoomConnectionResponse>(jsonResponse, options);
 
-                    if (result == null || result.RoomInfo == null || string.IsNullOrEmpty(result.NodeIp))
+                    if (result == null || result.RoomInfo == null || string.IsNullOrEmpty(result.NodeIp) || result.NodePort <= 0)
                     {
                         MessageBox.Show("Dữ liệu phân phối phòng từ Master Server không hợp lệ.");
                         return;
@@ -448,15 +497,15 @@ namespace DrawClient.ViewModels
 
         private void ExecuteLogout(object obj)
         {
-            try
-            {
-                ClientSocket.Instance.Disconnect();
-            }
-            catch
-            {
-            }
+            try { ClientSocket.Instance.Disconnect(); } catch { }
 
-            Application.Current.Shutdown();
+            // Xóa thông tin đăng nhập
+            LoginViewModel.CurrentUsername = null;
+
+            IsProfilePopoverVisible = false;
+
+            // Về màn hình đăng nhập thay vì tắt app
+            GoToLogin?.Invoke();
         }
 
         public event PropertyChangedEventHandler PropertyChanged;

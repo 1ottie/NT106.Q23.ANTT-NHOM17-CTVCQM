@@ -8,10 +8,10 @@ namespace DrawServer
         {
             Console.OutputEncoding = System.Text.Encoding.UTF8;
             Console.Title = "Node Server - Drawing App";
-            int port = 6001; // Port chạy Socket của Node vẽ này
+            int port = AppConfig.NodePort;
 
-            string connectionString = "server=127.0.0.1;database=online_Drawing_DB;user=root;password=";
-            var cleanupService = new RoomCleanupService(connectionString);
+            var cleanupService = new RoomCleanupService(AppConfig.DbConnectionString);
+            cleanupService.StartCleanupTimer();
 
             Console.Title = "Node Server - Drawing App";
             Console.WriteLine("=======================================");

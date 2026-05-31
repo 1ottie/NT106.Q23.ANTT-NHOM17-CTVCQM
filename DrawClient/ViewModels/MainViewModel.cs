@@ -31,15 +31,16 @@ namespace DrawClient.ViewModels
         private void NavigateToLobby()
         {
             var lobbyVM = new LobbyViewModel();
-            lobbyVM.GoToCanvas = NavigateToCanvas; // Khi tạo/vào phòng thì gọi hàm NavigateToCanvas
+            lobbyVM.GoToCanvas = NavigateToCanvas;
+            lobbyVM.GoToLogin = NavigateToLogin;
             CurrentView = lobbyVM;
         }
 
         private void NavigateToCanvas(string roomId, string roomName, string password)
         {
-            // Truyền thêm 'password' vào trong CanvasViewModel
             var canvasVM = new CanvasViewModel(roomName, roomId, password);
             canvasVM.GoBackToLobby = NavigateToLobby;
+            canvasVM.GoToLogin = NavigateToLogin;
             CurrentView = canvasVM;
         }
 

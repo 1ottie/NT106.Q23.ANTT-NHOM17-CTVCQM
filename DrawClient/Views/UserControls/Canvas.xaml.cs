@@ -19,6 +19,8 @@ using System.Windows.Media.Imaging;
 using System.Windows.Shapes;
 using System.Windows.Threading;
 
+// For replay undo/redo tracking
+
 namespace DrawClient.Views.UserControls
 {
     public partial class Canvas : UserControl
@@ -27,8 +29,10 @@ namespace DrawClient.Views.UserControls
         private bool isDrawing = false;
         private CanvasViewModel _viewModel;
         private Point _startPoint;
-        private Stroke _currentTempStroke; // Stroke tạm thời để hiển thị khi đang kéo chuột
+        private Stroke _currentTempStroke;
         private bool isShapeDrawing = false;
+        // Lưu StrokeGroupId trước khi EndStroke() xóa nó, dùng cho StrokeCollected và eraser click.
+        private string _lastStrokeGroupId;
         private System.Windows.Shapes.Rectangle _ocrSelectionRect;
         private Point _ocrStartPoint;
         private DispatcherTimer _laserTimer;
@@ -40,6 +44,101 @@ namespace DrawClient.Views.UserControls
         private Dictionary<string, (Polyline Line, DispatcherTimer Timer)> _remoteLasers = new Dictionary<string, (Polyline, DispatcherTimer)>();
         //khai bái biến lưu vị trí cũ
         private Rect _oldSelectionBounds;
+
+        // Maps StrokeGroupId -> native InkCanvas strokes (smooth, multi-point).
+        // Used by RedrawAllFromActions to restore exact native strokes on undo/redo
+        // instead of choppy 2-point segment reconstructions.
+        private readonly Dictionary<string, List<Stroke>> _groupNativeStrokes = new Dictionary<string, List<Stroke>>();
+
+        // Replay: maps actionId -> Stroke for undo/redo during playback
+        private Dictionary<string, Stroke> _replayStrokeMap = new Dictionary<string, Stroke>();
+        private Dictionary<string, DrawMessage> _replayActionMap = new Dictionary<string, DrawMessage>();
+        private HashSet<string> _replayUndoneActions = new HashSet<string>();
+
+        // Stroke/UIElement → DrawAction: dùng để tìm DrawAction từ stroke khi move
+        private readonly Dictionary<Stroke, DrawAction> _strokeToAction = new Dictionary<Stroke, DrawAction>();
+        private readonly Dictionary<UIElement, DrawAction> _childToAction = new Dictionary<UIElement, DrawAction>();
+        // DrawAction.Id → Stroke/UIElement: dùng trong Phase 2 RedrawAllFromActions để apply TRANSFORM
+        private readonly Dictionary<string, Stroke> _actionIdToStroke = new Dictionary<string, Stroke>();
+        private readonly Dictionary<string, UIElement> _actionIdToChild = new Dictionary<string, UIElement>();
+        // Lưu bản gốc (chưa transform) của native PEN strokes để replay transform đúng
+        private readonly Dictionary<string, List<Stroke>> _groupNativeOriginals = new Dictionary<string, List<Stroke>>();
+        // strokeGroupId → stroke nhận từ mạng; mỗi group tích lũy thành 1 stroke thay vì nhiều đoạn rời
+        private readonly Dictionary<string, Stroke> _networkGroupStrokes = new Dictionary<string, Stroke>();
+        // groupId → strokes trong lần redraw hiện tại (dùng Phase 2 apply TRANSFORM cho PEN)
+        private Dictionary<string, List<Stroke>> _currentRedrawGroupStrokes = new Dictionary<string, List<Stroke>>();
+
+        // Lưu các TRANSFORM_SELECTION nhận từ mạng để Phase 3 của RedrawAllFromActions tái áp dụng.
+        // Cần thiết vì remote transforms không nằm trong UndoRedoManager nên bị mất sau undo/redo.
+        private class NetworkTransformEntry
+        {
+            public Matrix Matrix;
+            public List<string> StrokeGroupIds = new List<string>();
+            public List<string> TextActionIds   = new List<string>();
+        }
+        private readonly List<NetworkTransformEntry> _activeNetworkTransforms = new List<NetworkTransformEntry>();
+
+        // Inline text editing state
+        private Border _activeTextWrapper = null;
+        private TextBox _activeTextBox = null;
+        private TextBlock _editingExistingBlock = null;
+        private Border _textFloatingToolbar = null;
+        private Border _colorIndicatorBtn = null;
+        private bool _colorPickerOpen = false;
+
+        private void Logout_Click(object sender, RoutedEventArgs e)
+        {
+            // 1. Chủ động ép Popup đóng ngay lập tức để không bị kẹt giao diện
+            ProfilePopover.IsOpen = false;
+
+            // 2. Cập nhật lại biến Binding trong ViewModel (nếu có) để đồng bộ trạng thái công khai
+            if (this.DataContext is CanvasViewModel vm)
+            {
+                // Nếu trong CanvasViewModel của bạn có thuộc tính công khai này, hãy uncomment dòng dưới:
+                // vm.IsProfilePopoverVisible = false;
+            }
+
+            // 3. Dừng các Timer chạy ngầm của Canvas nếu có (Ví dụ laser timer tránh leak bộ nhớ)
+            if (_laserTimer != null && _laserTimer.IsEnabled)
+            {
+                _laserTimer.Stop();
+            }
+
+            // 4. Xóa dữ liệu phiên đăng nhập cũ trong LoginViewModel tĩnh (static)
+            LoginViewModel.Token = null;
+            LoginViewModel.CurrentUserId = 0;
+            LoginViewModel.CurrentUsername = string.Empty;
+
+            // 5. Reset thông tin định danh trên Socket kết nối 
+            if (ClientSocket.Instance != null)
+            {
+                ClientSocket.Instance.CurrentUserId = 0;
+                ClientSocket.Instance.CurrentUsername = string.Empty;
+                // Nếu hệ thống của bạn có hàm đóng hẳn kết nối phòng, hãy gọi ở đây:
+                // ClientSocket.Instance.Disconnect(); 
+            }
+
+            // 6. Tìm MainWindow của ứng dụng và đổi Content về lại LoginScreen công khai
+            Window mainWindow = Window.GetWindow(this);
+            if (mainWindow != null)
+            {
+                mainWindow.Content = new LoginScreen();
+            }
+        }
+
+        private void Logout_PreviewMouseLeftButtonDown(object sender, MouseButtonEventArgs e)
+        {
+            // Ép ViewModel thực thi lệnh Logout ngay khi nhấn chuột xuống, 
+            // trước khi InkCanvas làm mất focus và đóng Popup
+            if (this.DataContext is CanvasViewModel vm && vm.LogoutCommand != null)
+            {
+                if (vm.LogoutCommand.CanExecute(null))
+                {
+                    vm.LogoutCommand.Execute(null);
+                    e.Handled = true; // Đánh dấu đã xử lý để tránh lỗi double-click hoặc kẹt sự kiện
+                }
+            }
+        }
 
 
         public Canvas()
@@ -79,31 +178,157 @@ namespace DrawClient.Views.UserControls
             this.MyCanvas.SelectionMoved += MyCanvas_SelectionMoved;
             this.MyCanvas.SelectionResized += MyCanvas_SelectionResized;
             this.MyCanvas.SelectionMoving += MyCanvas_SelectionMoving;
+            this.MyCanvas.StrokeCollected += MyCanvas_StrokeCollected;
         }
         private void MyCanvas_SelectionMoving(object sender, InkCanvasSelectionEditingEventArgs e)
         {
-            // Lưu lại vị trí Bounds cũ ngay khi người dùng bắt đầu click giữ và kéo chuột di chuyển
-            _oldSelectionBounds = MyCanvas.GetSelectedStrokes().GetBounds();
+            // Tính bounds theo cùng cách với newBounds trong SyncSelectionTransform
+            // để scaleX/scaleY = 1.0 khi di chuyển thuần (không resize).
+            // e.OldRectangle có thể bao gồm margin của selection handles → gây scaleX ≠ 1 → sai vị trí sau history load.
+            var sel = MyCanvas.GetSelectedStrokes();
+            bool hasStrokes = sel != null && sel.Count > 0;
+            Rect bounds = hasStrokes ? sel.GetBounds() : Rect.Empty;
+
+            var selElems = MyCanvas.GetSelectedElements();
+            if (selElems != null)
+            {
+                foreach (UIElement el in selElems)
+                {
+                    if (el is TextBlock tb)
+                    {
+                        double l = InkCanvas.GetLeft(tb); if (double.IsNaN(l)) l = 0;
+                        double t = InkCanvas.GetTop(tb);  if (double.IsNaN(t)) t = 0;
+                        tb.Measure(new Size(double.PositiveInfinity, double.PositiveInfinity));
+                        var tbRect = new Rect(l, t, tb.DesiredSize.Width, tb.DesiredSize.Height);
+                        bounds = bounds.IsEmpty ? tbRect : Rect.Union(bounds, tbRect);
+                    }
+                }
+            }
+
+            _oldSelectionBounds = bounds.IsEmpty ? e.OldRectangle : bounds;
         }
 
         private void MyCanvas_SelectionMoved(object sender, EventArgs e)
         {
-            // Gọi chung hàm xử lý transform để gửi dữ liệu nhất quán 
-            // (bao gồm cả Index của các nét vẽ và sự thay đổi Bounds)
             SyncSelectionTransform();
         }
+
+        private void MyCanvas_StrokeCollected(object sender, InkCanvasStrokeCollectedEventArgs e)
+        {
+            string groupId = _viewModel?.CurrentStrokeGroupId ?? _lastStrokeGroupId;
+            if (string.IsNullOrEmpty(groupId))
+            {
+                // Nét đầu tiên: WPF InkCanvas stylus plugin init có thể khiến PreviewMouseDown
+                // không nhận diện được InkCanvas → BeginStroke() bị bỏ qua → groupId null.
+                // Tạo groupId ngay bây giờ để FallbackSyncStroke có thể sync đúng.
+                if (_viewModel == null) return;
+                _viewModel.BeginStroke();
+                groupId = _viewModel.CurrentStrokeGroupId;
+                _lastStrokeGroupId = groupId;
+                _viewModel.EndStroke();
+                if (string.IsNullOrEmpty(groupId)) return;
+            }
+            if (!_groupNativeStrokes.ContainsKey(groupId))
+                _groupNativeStrokes[groupId] = new List<Stroke>();
+            _groupNativeStrokes[groupId].Add(e.Stroke);
+
+            // Lưu bản gốc chưa transform để dùng trong RedrawAllFromActions Phase 2
+            if (!_groupNativeOriginals.ContainsKey(groupId))
+                _groupNativeOriginals[groupId] = new List<Stroke>();
+            _groupNativeOriginals[groupId].Add(e.Stroke.Clone());
+
+            if (_viewModel != null)
+            {
+                var repAction = _viewModel.UndoRedoManager.GetAllActionsIncludingUndone()
+                    .LastOrDefault(a => a.StrokeGroupId == groupId && a.ActionType == "DRAW");
+
+                if (repAction != null)
+                {
+                    // Canvas_MouseMove đã sync các segment → chỉ map stroke
+                    _strokeToAction[e.Stroke] = repAction;
+                }
+                else
+                {
+                    // Canvas_MouseMove không gửi được (thường xảy ra với nét đầu tiên do
+                    // InkCanvas stylus plugin init) → sync toàn bộ stroke ngay bây giờ
+                    FallbackSyncStroke(e.Stroke, groupId);
+
+                    // Cập nhật mapping sau khi đã tạo DrawActions
+                    repAction = _viewModel.UndoRedoManager.GetAllActionsIncludingUndone()
+                        .LastOrDefault(a => a.StrokeGroupId == groupId && a.ActionType == "DRAW");
+                    if (repAction != null)
+                        _strokeToAction[e.Stroke] = repAction;
+                }
+            }
+        }
+
+        // Gửi toàn bộ stroke khi Canvas_MouseMove không sync được (nét đầu tiên)
+        private void FallbackSyncStroke(Stroke stroke, string groupId)
+        {
+            if (_viewModel == null || stroke == null) return;
+            var pts = stroke.StylusPoints;
+
+            string prev = _viewModel.CurrentStrokeGroupId;
+            _viewModel.CurrentStrokeGroupId = groupId;
+            try
+            {
+                if (pts.Count < 2)
+                {
+                    // Stroke 1 điểm (click nhanh / nét đầu tiên init stylus) —
+                    // vẫn gửi 1 segment ngắn để client khác nhận được.
+                    var p = pts.Count == 1
+                        ? new Point(pts[0].X, pts[0].Y)
+                        : new Point(stroke.GetBounds().X, stroke.GetBounds().Y);
+                    _viewModel.SendDrawData(p, new Point(p.X + 1.0, p.Y + 1.0));
+                    return;
+                }
+
+                for (int i = 0; i < pts.Count - 1; i++)
+                    _viewModel.SendDrawData(new Point(pts[i].X, pts[i].Y),
+                                            new Point(pts[i + 1].X, pts[i + 1].Y));
+            }
+            finally
+            {
+                _viewModel.CurrentStrokeGroupId = prev;
+            }
+        }
+
         private void Canvas_Unloaded(object sender, RoutedEventArgs e)
         {
             if (_viewModel != null)
             {
                 _viewModel.OnLineReceived -= DrawNetworkLine;
+                _viewModel.OnEraseReceived -= EraseNetworkStroke;
+                _viewModel.OnLaserReceived -= ShowRemoteLaser;
                 _viewModel.OnCanvasCleared -= ClearLocalCanvas;
                 _viewModel.PropertyChanged -= ViewModel_PropertyChanged;
                 _viewModel.OnShapeReceived -= DrawShape;
                 _viewModel.OnTextReceived -= DrawText;
                 _viewModel.OnDeleteTextReceived -= DeleteTextFromNetwork;
-                // FIX SOCKET MEMORY LEAK
+                _viewModel.OnSelectionTransformedReceived -= HandleRemoteSelectionTransform;
+                _viewModel.OnUndoRedo -= RedrawAllFromActions;
+                _viewModel.OnTransformUndoRedo -= HandleTransformUndoRedo;
+                _viewModel.OnReplayDraw -= ReplayDraw;
+                _viewModel.OnReplayErase -= ReplayErase;
+                _viewModel.OnReplayShape -= ReplayShape;
+                _viewModel.OnReplayText -= ReplayText;
+                _viewModel.OnReplayUndo -= ReplayUndo;
+                _viewModel.OnReplayRedo -= ReplayRedo;
+                _viewModel.OnReplayClear -= ReplayClear;
+                _viewModel.OnReplayFinished -= ReplayFinished;
                 _viewModel.Cleanup();
+            }
+            _groupNativeStrokes.Clear();
+            _groupNativeOriginals.Clear();
+            _strokeToAction.Clear();
+            _childToAction.Clear();
+            _actionIdToStroke.Clear();
+            _actionIdToChild.Clear();
+            _networkGroupStrokes.Clear();
+            _activeNetworkTransforms.Clear();
+            if (_laserTimer != null && _laserTimer.IsEnabled)
+            {
+                _laserTimer.Stop();
             }
         }
 
@@ -122,40 +347,164 @@ namespace DrawClient.Views.UserControls
             SyncSelectionTransform();
         }
 
-        // Hàm xử lý đóng gói danh sách Index và gửi đi
+        // Ghi nhận di chuyển như một TRANSFORM action có thể undo/redo
         private void SyncSelectionTransform()
         {
             if (_viewModel == null) return;
 
             var selectedStrokes = MyCanvas.GetSelectedStrokes();
-            if (selectedStrokes == null || selectedStrokes.Count == 0) return;
+            var selectedElems = MyCanvas.GetSelectedElements();
+            bool hasStrokes = selectedStrokes != null && selectedStrokes.Count > 0;
+            bool hasText = selectedElems != null && selectedElems.OfType<TextBlock>().Any();
+            if (!hasStrokes && !hasText) return;
 
-            Rect newBounds = selectedStrokes.GetBounds();
+            // Tính newBounds bao gồm cả strokes lẫn TextBlocks đang được chọn
+            Rect newBounds = hasStrokes ? selectedStrokes.GetBounds() : Rect.Empty;
+            if (hasText && selectedElems != null)
+            {
+                foreach (UIElement el in selectedElems)
+                {
+                    if (el is TextBlock tb)
+                    {
+                        double l = InkCanvas.GetLeft(tb); if (double.IsNaN(l)) l = 0;
+                        double t = InkCanvas.GetTop(tb);  if (double.IsNaN(t)) t = 0;
+                        tb.Measure(new Size(double.PositiveInfinity, double.PositiveInfinity));
+                        var tbRect = new Rect(l, t, tb.DesiredSize.Width, tb.DesiredSize.Height);
+                        newBounds = newBounds.IsEmpty ? tbRect : Rect.Union(newBounds, tbRect);
+                    }
+                }
+            }
+            if (newBounds.IsEmpty) return;
 
-            // Kiểm tra xem có dịch chuyển thực sự không
             if (Math.Abs(newBounds.X - _oldSelectionBounds.X) > 0.1 ||
                 Math.Abs(newBounds.Y - _oldSelectionBounds.Y) > 0.1 ||
                 Math.Abs(newBounds.Width - _oldSelectionBounds.Width) > 0.1 ||
                 Math.Abs(newBounds.Height - _oldSelectionBounds.Height) > 0.1)
             {
-                // Tìm xem các nét vẽ đang chọn nằm ở vị trí thứ mấy trong MyCanvas.Strokes
-                List<int> selectedIndices = new List<int>();
+                // Thu thập các action/group bị ảnh hưởng để UndoRedoManager theo dõi
+                var affectedActionIds = new List<string>();
+                var affectedGroupIds = new List<string>();
+
                 foreach (var stroke in selectedStrokes)
                 {
-                    int index = MyCanvas.Strokes.IndexOf(stroke);
-                    if (index >= 0)
+                    if (_strokeToAction.TryGetValue(stroke, out var affectedAction))
                     {
-                        selectedIndices.Add(index);
+                        if (affectedAction.ActionType == "DRAW" &&
+                            !string.IsNullOrEmpty(affectedAction.StrokeGroupId) &&
+                            _groupNativeOriginals.ContainsKey(affectedAction.StrokeGroupId))
+                        {
+                            if (!affectedGroupIds.Contains(affectedAction.StrokeGroupId))
+                                affectedGroupIds.Add(affectedAction.StrokeGroupId);
+                        }
+                        else
+                        {
+                            if (!affectedActionIds.Contains(affectedAction.Id))
+                                affectedActionIds.Add(affectedAction.Id);
+                        }
+                    }
+                    else
+                    {
+                        // Stroke từ client khác nhận qua mạng → tra ngược _networkGroupStrokes
+                        foreach (var kvp in _networkGroupStrokes)
+                        {
+                            if (kvp.Value == stroke)
+                            {
+                                if (!affectedGroupIds.Contains(kvp.Key))
+                                    affectedGroupIds.Add(kvp.Key);
+                                break;
+                            }
+                        }
                     }
                 }
 
-                if (selectedIndices.Count > 0)
+                var selectedChildren = MyCanvas.GetSelectedElements();
+                if (selectedChildren != null)
                 {
-                    // Chuyển mảng Index thành chuỗi: "2,5,6"
-                    string indicesData = string.Join(",", selectedIndices);
+                    foreach (UIElement child in selectedChildren)
+                    {
+                        if (_childToAction.TryGetValue(child, out var affectedAction) &&
+                            !affectedActionIds.Contains(affectedAction.Id))
+                            affectedActionIds.Add(affectedAction.Id);
+                    }
+                }
 
-                    // Gửi cả Index lẫn tọa độ hộp để tính toán ma trận tỉ lệ
-                    _viewModel.SendSelectionTransform(indicesData, _oldSelectionBounds, newBounds);
+                // Ghi TRANSFORM action vào UndoRedoManager (undo/redo sẽ xử lý)
+                if (affectedActionIds.Count > 0 || affectedGroupIds.Count > 0)
+                {
+                    var transformAction = new DrawAction
+                    {
+                        Id = DrawAction.GenerateId(),
+                        ActionType = "TRANSFORM",
+                        UserId = ClientSocket.Instance.CurrentUserId,
+                        Username = ClientSocket.Instance.CurrentUsername,
+                        RoomId = _viewModel.RoomId,
+                        StrokeGroupId = DrawAction.GenerateId(),
+                        AffectedActionIds = affectedActionIds.Count > 0 ? affectedActionIds : null,
+                        AffectedStrokeGroupIds = affectedGroupIds.Count > 0 ? affectedGroupIds : null,
+                        TransformOldX = _oldSelectionBounds.X,
+                        TransformOldY = _oldSelectionBounds.Y,
+                        TransformOldW = _oldSelectionBounds.Width,
+                        TransformOldH = _oldSelectionBounds.Height,
+                        TransformNewX = newBounds.X,
+                        TransformNewY = newBounds.Y,
+                        TransformNewW = newBounds.Width,
+                        TransformNewH = newBounds.Height
+                    };
+                    _viewModel.UndoRedoManager.AddAction(transformAction);
+                    _viewModel.UpdateHistoryUI();
+                }
+
+                // Gửi network sync dùng "G:groupId" thay vì index —
+                // tránh index sai khi các client vẽ đồng thời (index thay đổi theo thứ tự nhận).
+                var selectedIdentifiers = new List<string>();
+                foreach (var stroke in selectedStrokes)
+                {
+                    string groupId = null;
+                    if (_strokeToAction.TryGetValue(stroke, out var act))
+                    {
+                        // SHAPE strokes: remote maps _actionIdToStroke[act.Id], not act.StrokeGroupId
+                        groupId = (act.ActionType == "SHAPE") ? act.Id : act.StrokeGroupId;
+                    }
+                    else
+                    {
+                        foreach (var kvp in _networkGroupStrokes)
+                        {
+                            if (kvp.Value == stroke) { groupId = kvp.Key; break; }
+                        }
+                    }
+
+                    if (!string.IsNullOrEmpty(groupId))
+                        selectedIdentifiers.Add("G:" + groupId);
+                    else
+                    {
+                        // Fallback: dùng index (backward-compat với data cũ trong DB)
+                        int idx = MyCanvas.Strokes.IndexOf(stroke);
+                        if (idx >= 0) selectedIdentifiers.Add(idx.ToString());
+                    }
+                }
+
+                // Thu thập index của TextBlock bị di chuyển
+                var allTextBlocks = MyCanvas.Children.OfType<TextBlock>().ToList();
+                var selectedChildIndices = new List<int>();
+                var selElements = MyCanvas.GetSelectedElements();
+                if (selElements != null)
+                {
+                    foreach (UIElement el in selElements)
+                    {
+                        if (el is TextBlock tb)
+                        {
+                            int ci = allTextBlocks.IndexOf(tb);
+                            if (ci >= 0) selectedChildIndices.Add(ci);
+                        }
+                    }
+                }
+
+                if (selectedIdentifiers.Count > 0 || selectedChildIndices.Count > 0)
+                {
+                    string childData = selectedChildIndices.Count > 0
+                        ? string.Join(",", selectedChildIndices) : "";
+                    _viewModel.SendSelectionTransform(
+                        string.Join(",", selectedIdentifiers), _oldSelectionBounds, newBounds, childData);
                 }
 
                 _oldSelectionBounds = newBounds;
@@ -174,10 +523,8 @@ namespace DrawClient.Views.UserControls
 
         private void Canvas_DataContextChanged(object sender, DependencyPropertyChangedEventArgs e)
         {
-
-            MyCanvas.SelectionMoved += MyCanvas_SelectionMoved;
-            MyCanvas.SelectionResized += MyCanvas_SelectionResized;
-            MyCanvas.SelectionChanged += MyCanvas_SelectionChanged;
+            // NOTE: SelectionMoved/Resized/Changed are already registered in the constructor.
+            // Do NOT re-register them here — that causes every event to fire twice.
             // 1. Unsubscribe VM cũ trước
             if (e.OldValue is CanvasViewModel oldVm)
             {
@@ -189,8 +536,8 @@ namespace DrawClient.Views.UserControls
                 oldVm.OnShapeReceived -= DrawShape;
                 oldVm.OnTextReceived -= DrawText;
                 oldVm.OnDeleteTextReceived -= DeleteTextFromNetwork;
-                // Hủy đăng ký sự kiện select cũ
                 oldVm.OnSelectionTransformedReceived -= HandleRemoteSelectionTransform;
+                oldVm.OnTransformUndoRedo -= HandleTransformUndoRedo;
 
                 if (oldVm.Toolbar != null)
                 {
@@ -226,6 +573,22 @@ namespace DrawClient.Views.UserControls
 
                 UpdateCurrentDrawingAttributes(_viewModel);
                 _viewModel.OnUndoRedo += RedrawAllFromActions;
+                _viewModel.OnTransformUndoRedo += HandleTransformUndoRedo;
+
+                // Replay/Play events
+                _viewModel.OnReplayDraw += ReplayDraw;
+                _viewModel.OnReplayErase += ReplayErase;
+                _viewModel.OnReplayShape += ReplayShape;
+                _viewModel.OnReplayText += ReplayText;
+                _viewModel.OnReplayUndo += ReplayUndo;
+                _viewModel.OnReplayRedo += ReplayRedo;
+                _viewModel.OnReplayClear += ReplayClear;
+                _viewModel.OnReplayFinished += ReplayFinished;
+
+                // Nếu có DRAW actions đã đến trước khi Canvas được set up (OnLineReceived còn null),
+                // redraw lại để các nét đó xuất hiện ngay thay vì chờ đến undo/redo.
+                if (_viewModel.UndoRedoManager.GetAllActionsIncludingUndone().Any(a => !a.IsUndone))
+                    RedrawAllFromActions();
             }
         }
 
@@ -234,27 +597,574 @@ namespace DrawClient.Views.UserControls
             Application.Current.Dispatcher.Invoke(() =>
             {
                 MyCanvas.Strokes.Clear();
+                _strokeToAction.Clear();
+                _childToAction.Clear();
+                _actionIdToStroke.Clear();
+                _actionIdToChild.Clear();
+                _networkGroupStrokes.Clear();
+                _currentRedrawGroupStrokes = new Dictionary<string, List<Stroke>>();
+
+                var textBlocksToRemove = MyCanvas.Children.OfType<TextBlock>().ToList();
+                foreach (var tb in textBlocksToRemove)
+                    MyCanvas.Children.Remove(tb);
+
                 if (_viewModel == null) return;
-                var actions = _viewModel.UndoRedoManager.GetAllActions().ToList();
-                foreach (var action in actions)
+                var allActions = _viewModel.UndoRedoManager.GetAllActionsIncludingUndone().ToList();
+
+                // ── Phase 1: Vẽ tất cả action không-undone, không phải TRANSFORM ──────────
+                // Remote DRAW segments được gom theo StrokeGroupId thành 1 stroke liên tục
+                // thay vì nhiều đoạn 2-điểm rời — tránh mất đồng bộ sau undo/redo.
+                var drawnNativeGroups = new HashSet<string>();
+                // groupId → list of ordered segments (for remote strokes)
+                var remoteDrawGroups = new Dictionary<string, List<DrawAction>>();
+
+                foreach (var action in allActions)
                 {
+                    // ERASE được xử lý ở Phase 4 (sau TRANSFORM) để erase đúng vị trí stroke đã di chuyển.
+                    if (action.IsUndone || action.ActionType == "TRANSFORM" || action.ActionType == "ERASE") continue;
+
+                    if (action.ActionType == "DRAW" && !string.IsNullOrEmpty(action.StrokeGroupId))
+                    {
+                        if (_groupNativeOriginals.TryGetValue(action.StrokeGroupId, out var originals))
+                        {
+                            // Local native stroke — dùng bản gốc chưa transform
+                            if (drawnNativeGroups.Add(action.StrokeGroupId))
+                            {
+                                if (!_currentRedrawGroupStrokes.ContainsKey(action.StrokeGroupId))
+                                    _currentRedrawGroupStrokes[action.StrokeGroupId] = new List<Stroke>();
+                                foreach (var orig in originals)
+                                {
+                                    var clone = orig.Clone();
+                                    MyCanvas.Strokes.Add(clone);
+                                    _strokeToAction[clone] = action;
+                                    _actionIdToStroke[action.Id] = clone;
+                                    _currentRedrawGroupStrokes[action.StrokeGroupId].Add(clone);
+                                }
+                            }
+                        }
+                        else
+                        {
+                            // Remote stroke — thu thập tất cả segments theo group
+                            if (!remoteDrawGroups.ContainsKey(action.StrokeGroupId))
+                                remoteDrawGroups[action.StrokeGroupId] = new List<DrawAction>();
+                            remoteDrawGroups[action.StrokeGroupId].Add(action);
+                        }
+                    }
+                    else if (action.ActionType != "DRAW" || string.IsNullOrEmpty(action.StrokeGroupId))
+                    {
+                        var s = DrawSingleAction(action);
+                        if (s != null)
+                        {
+                            _strokeToAction[s] = action;
+                            _actionIdToStroke[action.Id] = s;
+                        }
+                        // TEXT: DrawSingleAction đã tự set _childToAction và _actionIdToChild
+                    }
+                }
+
+                // Render remote stroke groups thành stroke nhiều điểm (giống DrawNetworkLine)
+                foreach (var kvp in remoteDrawGroups)
+                {
+                    string groupId = kvp.Key;
+                    var acts = kvp.Value;
+                    if (acts.Count == 0) continue;
+                    var firstAct = acts[0];
+
+                    // Gom StylusPoints từ tất cả segments
+                    var spoints = new StylusPointCollection();
+                    spoints.Add(new StylusPoint(firstAct.StartPoint.X, firstAct.StartPoint.Y));
+                    foreach (var a in acts)
+                        spoints.Add(new StylusPoint(a.EndPoint.X, a.EndPoint.Y));
+
+                    // Xây dựng DrawingAttributes theo penType (giống DrawNetworkLine)
+                    string penType = firstAct.penType?.Trim();
+                    bool isHl = string.Equals(penType, "highlighter", StringComparison.OrdinalIgnoreCase)
+                                || (firstAct.Color?.StartsWith("[HL]") == true);
+                    bool isFt = string.Equals(penType, "fountain", StringComparison.OrdinalIgnoreCase);
+                    string colorStr = firstAct.Color?.Replace("[HL]", "") ?? "#000000";
+                    Color parsedColor;
+                    try { parsedColor = (Color)ColorConverter.ConvertFromString(colorStr); }
+                    catch { parsedColor = Colors.Black; }
+
+                    var da = new DrawingAttributes { Color = parsedColor, IgnorePressure = true, IsHighlighter = isHl };
+                    if (isHl)
+                    {
+                        da.Width = firstAct.Thickness * 1.5; da.Height = firstAct.Thickness * 1.5;
+                        da.StylusTip = StylusTip.Rectangle; da.FitToCurve = false;
+                    }
+                    else if (isFt)
+                    {
+                        da.StylusTip = StylusTip.Rectangle;
+                        da.Width = firstAct.Thickness * 0.8; da.Height = firstAct.Thickness * 1.8;
+                        da.FitToCurve = true; da.IsHighlighter = false;
+                    }
+                    else
+                    {
+                        da.Width = firstAct.Thickness; da.Height = firstAct.Thickness;
+                        da.StylusTip = StylusTip.Ellipse; da.FitToCurve = true;
+                    }
+
+                    var stroke = new Stroke(spoints) { DrawingAttributes = da };
+                    MyCanvas.Strokes.Add(stroke);
+                    // Đăng ký để các segment mới đến sau vẫn nối vào stroke này
+                    _networkGroupStrokes[groupId] = stroke;
+                    _currentRedrawGroupStrokes[groupId] = new List<Stroke> { stroke };
+                    _strokeToAction[stroke] = firstAct;
+                    _actionIdToStroke[firstAct.Id] = stroke;
+                }
+
+                // ── Phase 2+3: Apply TRANSFORM — unsubscribe SelectionMoved/Resized trước ──────
+                // coll.Transform() trên stroke đang selected có thể kích SelectionResized →
+                // SyncSelectionTransform → tạo TRANSFORM spurious → làm hỏng undo/redo stack.
+                MyCanvas.SelectionMoved -= MyCanvas_SelectionMoved;
+                MyCanvas.SelectionResized -= MyCanvas_SelectionResized;
+                try
+                {
+                    foreach (var action in allActions)
+                    {
+                        if (action.IsUndone || action.ActionType != "TRANSFORM") continue;
+                        ApplyTransformActionToCanvas(action);
+                    }
+
+                    foreach (var nt in _activeNetworkTransforms)
+                        ApplyNetworkTransformEntry(nt);
+                }
+                finally
+                {
+                    MyCanvas.SelectionMoved += MyCanvas_SelectionMoved;
+                    MyCanvas.SelectionResized += MyCanvas_SelectionResized;
+                }
+
+                // ── Phase 4: Apply ERASE sau tất cả TRANSFORM ────────────────────────────────
+                // Stroke đã ở đúng vị trí sau Phase 2+3; ERASE mới xóa đúng chỗ (kể cả stroke đã move).
+                foreach (var action in allActions)
+                {
+                    if (action.IsUndone || action.ActionType != "ERASE") continue;
                     DrawSingleAction(action);
                 }
             });
         }
 
-        private void DrawSingleAction(DrawAction action)
+        private void ApplyNetworkTransformEntry(NetworkTransformEntry nt)
+        {
+            // Áp dụng transform từ TRANSFORM_SELECTION nhận qua mạng lên stroke/text hiện có trên canvas.
+            // Được gọi trong Phase 3 của RedrawAllFromActions để không mất vị trí sau undo/redo.
+            foreach (var gid in nt.StrokeGroupIds)
+            {
+                if (_networkGroupStrokes.TryGetValue(gid, out var ns) && MyCanvas.Strokes.Contains(ns))
+                {
+                    new StrokeCollection { ns }.Transform(nt.Matrix, false);
+                }
+                else if (_currentRedrawGroupStrokes.TryGetValue(gid, out var strokes))
+                {
+                    var coll = new StrokeCollection();
+                    foreach (var s in strokes) coll.Add(s);
+                    coll.Transform(nt.Matrix, false);
+                }
+                else if (_actionIdToStroke.TryGetValue(gid, out var actionStroke) && MyCanvas.Strokes.Contains(actionStroke))
+                {
+                    new StrokeCollection { actionStroke }.Transform(nt.Matrix, false);
+                }
+            }
+            foreach (var aid in nt.TextActionIds)
+            {
+                if (_actionIdToChild.TryGetValue(aid, out var child) && MyCanvas.Children.Contains(child))
+                {
+                    double l = InkCanvas.GetLeft(child); if (double.IsNaN(l)) l = 0;
+                    double t = InkCanvas.GetTop(child);  if (double.IsNaN(t)) t = 0;
+                    InkCanvas.SetLeft(child, l * nt.Matrix.M11 + nt.Matrix.OffsetX);
+                    InkCanvas.SetTop(child,  t * nt.Matrix.M22 + nt.Matrix.OffsetY);
+                }
+            }
+        }
+
+        private void ApplyTransformActionToCanvas(DrawAction transformAction)
+        {
+            double oldW = transformAction.TransformOldW;
+            double oldH = transformAction.TransformOldH;
+            double scaleX = oldW > 1e-6 ? transformAction.TransformNewW / oldW : 1.0;
+            double scaleY = oldH > 1e-6 ? transformAction.TransformNewH / oldH : 1.0;
+            double offsetX = transformAction.TransformNewX - transformAction.TransformOldX * scaleX;
+            double offsetY = transformAction.TransformNewY - transformAction.TransformOldY * scaleY;
+            var matrix = new Matrix();
+            matrix.Scale(scaleX, scaleY);
+            matrix.Translate(offsetX, offsetY);
+
+            // Apply cho SHAPE/TEXT (via actionId)
+            if (transformAction.AffectedActionIds != null)
+            {
+                foreach (var affId in transformAction.AffectedActionIds)
+                {
+                    if (_actionIdToStroke.TryGetValue(affId, out var stroke))
+                    {
+                        var coll = new StrokeCollection { stroke };
+                        coll.Transform(matrix, false);
+                    }
+                    else if (_actionIdToChild.TryGetValue(affId, out var child))
+                    {
+                        double l = InkCanvas.GetLeft(child);
+                        double t = InkCanvas.GetTop(child);
+                        if (double.IsNaN(l)) l = 0;
+                        if (double.IsNaN(t)) t = 0;
+                        InkCanvas.SetLeft(child, l * scaleX + offsetX);
+                        InkCanvas.SetTop(child, t * scaleY + offsetY);
+                    }
+                }
+            }
+
+            // Apply cho native PEN strokes (via groupId)
+            if (transformAction.AffectedStrokeGroupIds != null)
+            {
+                foreach (var gid in transformAction.AffectedStrokeGroupIds)
+                {
+                    if (_currentRedrawGroupStrokes.TryGetValue(gid, out var strokes))
+                    {
+                        var coll = new StrokeCollection();
+                        foreach (var s in strokes) coll.Add(s);
+                        coll.Transform(matrix, false);
+                    }
+                }
+            }
+        }
+
+        // Được gọi khi undo/redo TRANSFORM action — gửi reverse TRANSFORM_SELECTION để sync các client khác.
+        // Phải được gọi TRƯỚC OnUndoRedo/RedrawAllFromActions để stroke còn ở vị trí cũ → index còn đúng.
+        private void HandleTransformUndoRedo(DrawAction transformAction, bool isUndo)
+        {
+            if (_viewModel == null || transformAction == null) return;
+
+            var affectedStrokes = new List<Stroke>();
+            var affectedIds = new HashSet<string>(transformAction.AffectedActionIds ?? new List<string>());
+            var affectedGroups = new HashSet<string>(transformAction.AffectedStrokeGroupIds ?? new List<string>());
+
+            foreach (var stroke in MyCanvas.Strokes)
+            {
+                if (_strokeToAction.TryGetValue(stroke, out var action))
+                {
+                    if (affectedIds.Contains(action.Id) ||
+                        (!string.IsNullOrEmpty(action.StrokeGroupId) && affectedGroups.Contains(action.StrokeGroupId)))
+                        affectedStrokes.Add(stroke);
+                }
+                else if (affectedGroups.Count > 0)
+                {
+                    // Network stroke (không có trong _strokeToAction) — tra ngược _networkGroupStrokes
+                    foreach (var kvp in _networkGroupStrokes)
+                    {
+                        if (kvp.Value == stroke && affectedGroups.Contains(kvp.Key))
+                        {
+                            affectedStrokes.Add(stroke);
+                            break;
+                        }
+                    }
+                }
+            }
+
+            // Thu thập TextBlock bị ảnh hưởng để sync undo/redo cho text
+            var allTextBlocks = MyCanvas.Children.OfType<TextBlock>().ToList();
+            var affectedTextIndices = new List<int>();
+            foreach (var affId in affectedIds)
+            {
+                if (_actionIdToChild.TryGetValue(affId, out var child) && child is TextBlock tb)
+                {
+                    int ci = allTextBlocks.IndexOf(tb);
+                    if (ci >= 0) affectedTextIndices.Add(ci);
+                }
+            }
+
+            if (affectedStrokes.Count == 0 && affectedTextIndices.Count == 0) return;
+
+            // Dùng G:groupId thay vì index để sync undo/redo transform đúng trên các client
+            // SHAPE strokes dùng act.Id vì remote map _actionIdToStroke[act.Id]
+            var identifiers = new List<string>();
+            foreach (var s in affectedStrokes)
+            {
+                string groupId = null;
+                if (_strokeToAction.TryGetValue(s, out var act))
+                    groupId = (act.ActionType == "SHAPE") ? act.Id : act.StrokeGroupId;
+                else
+                {
+                    foreach (var kvp in _networkGroupStrokes)
+                    {
+                        if (kvp.Value == s) { groupId = kvp.Key; break; }
+                    }
+                }
+
+                if (!string.IsNullOrEmpty(groupId))
+                    identifiers.Add("G:" + groupId);
+                else
+                {
+                    int fallbackIdx = MyCanvas.Strokes.IndexOf(s);
+                    if (fallbackIdx >= 0) identifiers.Add(fallbackIdx.ToString());
+                }
+            }
+            if (identifiers.Count == 0 && affectedTextIndices.Count == 0) return;
+
+            // Reverse: nếu undo thì gửi newBounds→oldBounds, nếu redo thì gửi oldBounds→newBounds
+            Rect oldB, newB;
+            if (isUndo)
+            {
+                oldB = new Rect(transformAction.TransformNewX, transformAction.TransformNewY,
+                                transformAction.TransformNewW, transformAction.TransformNewH);
+                newB = new Rect(transformAction.TransformOldX, transformAction.TransformOldY,
+                                transformAction.TransformOldW, transformAction.TransformOldH);
+            }
+            else
+            {
+                oldB = new Rect(transformAction.TransformOldX, transformAction.TransformOldY,
+                                transformAction.TransformOldW, transformAction.TransformOldH);
+                newB = new Rect(transformAction.TransformNewX, transformAction.TransformNewY,
+                                transformAction.TransformNewW, transformAction.TransformNewH);
+            }
+
+            string childData = affectedTextIndices.Count > 0 ? string.Join(",", affectedTextIndices) : "";
+            _viewModel.SendSelectionTransform(string.Join(",", identifiers), oldB, newB, childData);
+        }
+
+        #region Replay/Play Handlers
+
+        private void ReplayDraw(DrawMessage msg)
+        {
+            Application.Current.Dispatcher.Invoke(() =>
+            {
+                try
+                {
+                    string colorStr = msg.color ?? "#000000";
+                    bool isHighlighter = msg.isHighlighter || colorStr.StartsWith("[HL]");
+                    string colorToUse = colorStr.Replace("[HL]", "");
+
+                    if (string.IsNullOrWhiteSpace(colorToUse))
+                        colorToUse = "#000000";
+
+                    StylusPointCollection points = new StylusPointCollection
+                    {
+                        new StylusPoint(msg.x1, msg.y1),
+                        new StylusPoint(msg.x2, msg.y2)
+                    };
+
+                    Color parsedColor = (Color)ColorConverter.ConvertFromString(colorToUse);
+                    bool isFountain = string.Equals(msg.penType?.Trim(), "fountain", StringComparison.OrdinalIgnoreCase);
+
+                    DrawingAttributes da = new DrawingAttributes
+                    {
+                        Color = parsedColor,
+                        IgnorePressure = true,
+                        IsHighlighter = isHighlighter
+                    };
+
+                    if (isHighlighter)
+                    {
+                        da.Width = msg.thickness * 1.5;
+                        da.Height = msg.thickness * 1.5;
+                        da.StylusTip = StylusTip.Rectangle;
+                        da.FitToCurve = false;
+                    }
+                    else if (isFountain)
+                    {
+                        da.StylusTip = StylusTip.Rectangle;
+                        da.Width = msg.thickness * 0.8;
+                        da.Height = msg.thickness * 1.8;
+                        da.FitToCurve = true;
+                        da.IsHighlighter = false;
+                    }
+                    else
+                    {
+                        da.Width = msg.thickness;
+                        da.Height = msg.thickness;
+                        da.StylusTip = StylusTip.Ellipse;
+                        da.FitToCurve = true;
+                    }
+
+                    Stroke stroke = new Stroke(points) { DrawingAttributes = da };
+                    MyCanvas.Strokes.Add(stroke);
+
+                    // Track for undo/redo during replay
+                    if (!string.IsNullOrEmpty(msg.actionId))
+                    {
+                        _replayStrokeMap[msg.actionId] = stroke;
+                        _replayActionMap[msg.actionId] = msg;
+                    }
+                }
+                catch { }
+            });
+        }
+
+        private void ReplayErase(DrawMessage msg)
+        {
+            Application.Current.Dispatcher.Invoke(() =>
+            {
+                try
+                {
+                    double safeThickness = Math.Max(2.0, msg.thickness);
+                    Point start = new Point(msg.x1, msg.y1);
+                    Point end = new Point(msg.x2, msg.y2);
+
+                    if (start.X == end.X && start.Y == end.Y)
+                        end = new Point(start.X + 0.1, start.Y + 0.1);
+
+                    MyCanvas.Strokes.Erase(
+                        new Point[] { start, end },
+                        new EllipseStylusShape(safeThickness, safeThickness));
+                }
+                catch { }
+            });
+        }
+
+        private void ReplayShape(DrawMessage msg)
+        {
+            Application.Current.Dispatcher.Invoke(() =>
+            {
+                try
+                {
+                    StylusPointCollection points = null;
+                    Point start = new Point(msg.x1, msg.y1);
+                    Point end = new Point(msg.x2, msg.y2);
+
+                    switch (msg.shapeType?.ToLower())
+                    {
+                        case "rectangle":
+                        case "square":
+                            points = CreateRectanglePoints(start, end);
+                            break;
+                        case "ellipse":
+                        case "circle":
+                            points = CreateEllipsePoints(start, end);
+                            break;
+                        case "triangle":
+                            points = CreateTrianglePoints(start, end);
+                            break;
+                        case "line":
+                            points = CreateLinePoints(start, end);
+                            break;
+                    }
+
+                    if (points == null) return;
+
+                    Stroke stroke = new Stroke(points)
+                    {
+                        DrawingAttributes = new DrawingAttributes
+                        {
+                            Color = (Color)ColorConverter.ConvertFromString(msg.color ?? "#000000"),
+                            Width = msg.thickness,
+                            Height = msg.thickness,
+                            FitToCurve = false,
+                            IgnorePressure = true
+                        }
+                    };
+
+                    MyCanvas.Strokes.Add(stroke);
+
+                    if (!string.IsNullOrEmpty(msg.actionId))
+                    {
+                        _replayStrokeMap[msg.actionId] = stroke;
+                        _replayActionMap[msg.actionId] = msg;
+                        // Cần thiết để HandleRemoteSelectionTransform tìm được stroke
+                        // khi xử lý TRANSFORM_SELECTION trong quá trình replay.
+                        _actionIdToStroke[msg.actionId] = stroke;
+                    }
+                }
+                catch { }
+            });
+        }
+
+        private void ReplayText(DrawMessage msg)
+        {
+            Application.Current.Dispatcher.Invoke(() =>
+            {
+                try
+                {
+                    TextBlock tb = new TextBlock
+                    {
+                        Text = msg.text,
+                        FontSize = msg.fontSize > 0 ? msg.fontSize : 14,
+                        FontFamily = new FontFamily(!string.IsNullOrEmpty(msg.fontFamily) ? msg.fontFamily : "Roboto"),
+                        Foreground = new SolidColorBrush((Color)ColorConverter.ConvertFromString(msg.color ?? "#000000")),
+                        Background = Brushes.Transparent
+                    };
+
+                    InkCanvas.SetLeft(tb, msg.x1);
+                    InkCanvas.SetTop(tb, msg.y1);
+                    MyCanvas.Children.Add(tb);
+
+                    if (msg.x2 > 0 && msg.y2 > 0)
+                        MyCanvas.Strokes.Erase(new Rect(msg.x1, msg.y1, msg.x2, msg.y2));
+                }
+                catch { }
+            });
+        }
+
+        private void ReplayUndo(string actionId)
+        {
+            Application.Current.Dispatcher.Invoke(() =>
+            {
+                if (_replayStrokeMap.TryGetValue(actionId, out var stroke))
+                {
+                    MyCanvas.Strokes.Remove(stroke);
+                    _replayUndoneActions.Add(actionId);
+                }
+            });
+        }
+
+        private void ReplayRedo(string actionId)
+        {
+            Application.Current.Dispatcher.Invoke(() =>
+            {
+                if (_replayUndoneActions.Contains(actionId))
+                {
+                    // Re-add the stroke to canvas
+                    if (_replayStrokeMap.TryGetValue(actionId, out var stroke))
+                    {
+                        if (!MyCanvas.Strokes.Contains(stroke))
+                            MyCanvas.Strokes.Add(stroke);
+                    }
+                    _replayUndoneActions.Remove(actionId);
+                }
+            });
+        }
+
+        private void ReplayClear()
+        {
+            Application.Current.Dispatcher.Invoke(() =>
+            {
+                MyCanvas.Strokes.Clear();
+                MyCanvas.Children.Clear();
+                _replayStrokeMap.Clear();
+                _replayActionMap.Clear();
+                _replayUndoneActions.Clear();
+            });
+        }
+
+        private void ReplayFinished()
+        {
+            Application.Current.Dispatcher.Invoke(() =>
+            {
+                MyCanvas.Strokes.Clear();
+                MyCanvas.Children.Clear();
+                _strokeToAction.Clear();
+                _childToAction.Clear();
+                _actionIdToStroke.Clear();
+                _actionIdToChild.Clear();
+                _replayStrokeMap.Clear();
+                _replayActionMap.Clear();
+                _replayUndoneActions.Clear();
+
+                // Dùng RedrawAllFromActions để áp dụng đúng cả TRANSFORM actions
+                RedrawAllFromActions();
+            });
+        }
+
+        #endregion
+
+        private Stroke DrawSingleAction(DrawAction action)
         {
             switch (action.ActionType)
             {
                 case "DRAW":
-                    // Kiểm tra loại bút từ thuộc tính penType hoặc màu sắc
                     string actionPenType = action.penType?.Trim();
                     bool isHighlighter = string.Equals(actionPenType, "highlighter", StringComparison.OrdinalIgnoreCase)
                                          || (action.Color?.StartsWith("[HL]") == true);
                     bool isFountain = string.Equals(actionPenType, "fountain", StringComparison.OrdinalIgnoreCase);
 
-                    string colorToUse = action.Color.Replace("[HL]", ""); // Lấy mã màu thuần
+                    string colorToUse = action.Color.Replace("[HL]", "");
                     double thickness = action.Thickness;
 
                     if (string.IsNullOrWhiteSpace(colorToUse))
@@ -276,7 +1186,6 @@ namespace DrawClient.Views.UserControls
                             IgnorePressure = true,
                             IsHighlighter = isHighlighter
                         };
-                        // ÁP DỤNG ĐÚNG THUỘC TÍNH CHO TỪNG LOẠI BÚT GIỐNG NHƯ KHI VẼ LOCAL
                         if (isHighlighter)
                         {
                             da.Width = thickness * 1.5;
@@ -292,7 +1201,7 @@ namespace DrawClient.Views.UserControls
                             da.FitToCurve = true;
                             da.IsHighlighter = false;
                         }
-                        else // Bút chì / Bút vẽ thường mặc định
+                        else
                         {
                             da.Width = thickness;
                             da.Height = thickness;
@@ -301,27 +1210,35 @@ namespace DrawClient.Views.UserControls
                         }
                         Stroke stroke = new Stroke(points) { DrawingAttributes = da };
                         MyCanvas.Strokes.Add(stroke);
+                        return stroke;
                     }
                     catch { }
-                    break;
+                    return null;
+
                 case "SHAPE":
                     var points2 = CreateShapePointsFromAction(action);
                     if (points2 != null)
                     {
-                        var stroke = new Stroke(points2)
+                        try
                         {
-                            DrawingAttributes = new DrawingAttributes
+                            var stroke = new Stroke(points2)
                             {
-                                Color = (Color)ColorConverter.ConvertFromString(action.Color),
-                                Width = action.Thickness,
-                                Height = action.Thickness,
-                                FitToCurve = false,
-                                IgnorePressure = true
-                            }
-                        };
-                        MyCanvas.Strokes.Add(stroke);
+                                DrawingAttributes = new DrawingAttributes
+                                {
+                                    Color = (Color)ColorConverter.ConvertFromString(action.Color),
+                                    Width = action.Thickness,
+                                    Height = action.Thickness,
+                                    FitToCurve = false,
+                                    IgnorePressure = true
+                                }
+                            };
+                            MyCanvas.Strokes.Add(stroke);
+                            return stroke;
+                        }
+                        catch { }
                     }
-                    break;
+                    return null;
+
                 case "ERASE":
                     try
                     {
@@ -329,20 +1246,50 @@ namespace DrawClient.Views.UserControls
                         Point start = action.StartPoint;
                         Point end = action.EndPoint;
 
-                        // Chống lỗi điểm trùng nhau
                         if (start.X == end.X && start.Y == end.Y)
-                        {
                             end = new Point(start.X + 0.1, start.Y + 0.1);
-                        }
 
                         MyCanvas.Strokes.Erase(
                             new Point[] { start, end },
                             new EllipseStylusShape(safeThickness, safeThickness));
                     }
                     catch { }
-                    break;
+                    return null;
+
+                case "TEXT":
+                    try
+                    {
+                        if (!string.IsNullOrWhiteSpace(action.Text))
+                        {
+                            var tb = new TextBlock
+                            {
+                                Text = action.Text,
+                                FontSize = action.FontSize > 0 ? action.FontSize : 14,
+                                FontFamily = new FontFamily(!string.IsNullOrEmpty(action.FontFamily) ? action.FontFamily : "Roboto"),
+                                Foreground = new SolidColorBrush((Color)ColorConverter.ConvertFromString(action.Color ?? "#000000")),
+                                Background = Brushes.Transparent,
+                                TextWrapping = TextWrapping.Wrap,
+                                Cursor = Cursors.IBeam
+                            };
+                            InkCanvas.SetLeft(tb, action.StartPoint.X);
+                            InkCanvas.SetTop(tb, action.StartPoint.Y);
+                            MyCanvas.Children.Add(tb);
+                            _childToAction[tb] = action;
+                            _actionIdToChild[action.Id] = tb;
+                            if (action.EndPoint.X > 0 && action.EndPoint.Y > 0)
+                                MyCanvas.Strokes.Erase(new Rect(
+                                    action.StartPoint.X, action.StartPoint.Y,
+                                    action.EndPoint.X, action.EndPoint.Y));
+                        }
+                    }
+                    catch { }
+                    return null;
+
+                default:
+                    return null;
             }
         }
+
 
 
         private StylusPointCollection CreateShapePointsFromAction(DrawAction action)
@@ -454,7 +1401,7 @@ namespace DrawClient.Views.UserControls
                 {
                     MyCanvas.EditingMode = InkCanvasEditingMode.EraseByPoint;
                 }
-                else if (selectedTool == "shape")
+                else if (selectedTool == "shape" || selectedTool == "text" || selectedTool == "ocr")
                 {
                     MyCanvas.EditingMode = InkCanvasEditingMode.None;
                     return;
@@ -465,7 +1412,7 @@ namespace DrawClient.Views.UserControls
                 }
                 else
                 {
-                    if (vm.Toolbar.CurrentPenType == "Laser")
+                    if (string.Equals(vm.Toolbar.CurrentPenType, "laser", StringComparison.OrdinalIgnoreCase))
                     {
                         MyCanvas.EditingMode = InkCanvasEditingMode.None;
                     }
@@ -491,6 +1438,31 @@ namespace DrawClient.Views.UserControls
             {
                 isDrawing = false;
                 isShapeDrawing = false;
+
+                // Giải phóng mouse capture khi đổi tool, tránh InkCanvas không nhận event ở Select mode.
+                if (MyCanvas.IsMouseCaptured)
+                    MyCanvas.ReleaseMouseCapture();
+
+                // Xóa preview shape tạm thời ngay khi đổi tool (tránh ghost stroke)
+                if (_currentTempStroke != null)
+                {
+                    MyCanvas.Strokes.Remove(_currentTempStroke);
+                    _currentTempStroke = null;
+                }
+
+                // Clear laser trail immediately when switching away from pen/laser mode
+                if (e.PropertyName == nameof(CanvasViewModel.SelectedTool) &&
+                    _viewModel.SelectedTool?.ToLower() != "pen")
+                {
+                    _laserTimer.Stop();
+                    if (_currentLaserPolyline != null)
+                    {
+                        laserCanvas.Children.Remove(_currentLaserPolyline);
+                        _currentLaserPolyline = null;
+                    }
+                    laserDot.Visibility = Visibility.Collapsed;
+                }
+
                 bool isEraser = _viewModel.SelectedTool?.ToLower() == "eraser";
 
                 if (isEraser)
@@ -518,7 +1490,7 @@ namespace DrawClient.Views.UserControls
         {
             if (_viewModel == null)
                 return;
-            lastPoint = e.GetPosition(MyCanvas); // Cập nhật điểm bắt đầu ngay khi nhấn chuột
+            lastPoint = e.GetPosition(MyCanvas);
             _startPoint = lastPoint;
 
             DependencyObject source = e.OriginalSource as DependencyObject;
@@ -539,9 +1511,52 @@ namespace DrawClient.Views.UserControls
 
                 source = VisualTreeHelper.GetParent(source);
             }
+
             if (_viewModel != null && _viewModel.Toolbar.IsEraserSelected)
             {
                 EraseTextAtPoint(e.GetPosition(MyCanvas));
+            }
+
+            // Khởi nhóm nét vẽ sớm tại PreviewMouseDown để BeginStroke() luôn được gọi
+            // kể cả khi InkCanvas chặn Canvas_MouseDown ở Ink mode (stylus promotion).
+            // Chỉ áp dụng khi click trực tiếp trên InkCanvas (không phải toolbar).
+            if (e.LeftButton == MouseButtonState.Pressed)
+            {
+                string tool = _viewModel.SelectedTool?.ToLowerInvariant();
+                bool isPen = tool == "pen" || tool == "pencil";
+                bool isEraserTool = tool == "eraser" || (_viewModel.Toolbar?.IsEraserSelected == true);
+
+                if (isPen || isEraserTool)
+                {
+                    // Ưu tiên: đi lên visual tree để tìm InkCanvas.
+                    bool clickedOnInkCanvas = false;
+                    DependencyObject hitSrc = e.OriginalSource as DependencyObject;
+                    while (hitSrc != null)
+                    {
+                        if (hitSrc is InkCanvas)
+                        {
+                            clickedOnInkCanvas = true;
+                            break;
+                        }
+                        hitSrc = VisualTreeHelper.GetParent(hitSrc);
+                    }
+
+                    // Fallback: nét đầu tiên WPF stylus-plugin init có thể khiến visual tree chưa
+                    // có InkCanvas → dùng kiểm tra toạ độ trong bounds của MyCanvas.
+                    if (!clickedOnInkCanvas && MyCanvas != null)
+                    {
+                        Point pos = e.GetPosition(MyCanvas);
+                        clickedOnInkCanvas = pos.X >= 0 && pos.Y >= 0
+                                          && pos.X <= MyCanvas.ActualWidth
+                                          && pos.Y <= MyCanvas.ActualHeight;
+                    }
+
+                    if (clickedOnInkCanvas)
+                    {
+                        isDrawing = true;
+                        _viewModel.BeginStroke();
+                    }
+                }
             }
 
             _viewModel.IsProfilePopoverVisible = false;
@@ -553,12 +1568,23 @@ namespace DrawClient.Views.UserControls
             {
                 MyCanvas.Strokes.Clear();
                 MyCanvas.Children.Clear();
+                _groupNativeStrokes.Clear();
+                _groupNativeOriginals.Clear();
+                _strokeToAction.Clear();
+                _childToAction.Clear();
+                _actionIdToStroke.Clear();
+                _actionIdToChild.Clear();
+                _networkGroupStrokes.Clear();
+                _currentRedrawGroupStrokes = new Dictionary<string, List<Stroke>>();
+                _activeNetworkTransforms.Clear();
             });
         }
 
         private void ProfilePopover_PreviewMouseDown(object sender, MouseButtonEventArgs e)
         {
-            e.Handled = true;
+            // KHÔNG đánh dấu e.Handled = true ở đây —
+            // nếu handled thì event không tunnel xuống Button bên trong → command không chạy.
+            // Popup là visual tree riêng nên UserControl_PreviewMouseDown sẽ không bị trigger.
         }
         private void Canvas_MouseDown(object sender, MouseButtonEventArgs e)
         {
@@ -595,6 +1621,55 @@ namespace DrawClient.Views.UserControls
                     MyCanvas.CaptureMouse();
                     MyCanvas.Cursor = Cursors.Cross;
                 }
+                return;
+            }
+
+            // TEXT TOOL
+            if (_viewModel.Toolbar.IsTextSelected)
+            {
+                MyCanvas.EditingMode = InkCanvasEditingMode.None;
+                if (e.LeftButton != MouseButtonState.Pressed) return;
+
+                var clickPos = e.GetPosition(MyCanvas);
+
+                // If an active text box is open: check if the click is inside it or the floating toolbar
+                if (_activeTextWrapper != null)
+                {
+                    // Block clicks that originated from the floating toolbar buttons
+                    if (_textFloatingToolbar != null)
+                    {
+                        var src = e.OriginalSource as DependencyObject;
+                        while (src != null)
+                        {
+                            if (src == _textFloatingToolbar) return;
+                            src = VisualTreeHelper.GetParent(src);
+                        }
+                    }
+
+                    double wLeft = InkCanvas.GetLeft(_activeTextWrapper);
+                    double wTop = InkCanvas.GetTop(_activeTextWrapper);
+                    _activeTextWrapper.Measure(new Size(double.PositiveInfinity, double.PositiveInfinity));
+                    double wW = Math.Max(_activeTextWrapper.ActualWidth, _activeTextWrapper.DesiredSize.Width);
+                    double wH = Math.Max(_activeTextWrapper.ActualHeight, _activeTextWrapper.DesiredSize.Height);
+                    if (new Rect(wLeft, wTop, wW + 4, wH + 4).Contains(clickPos))
+                        return; // click inside active box — let TextBox handle it
+
+                    // Click outside: commit current, then check for re-edit target
+                    CommitTextEdit();
+                    TextBlock hit2 = FindTextBlockAt(clickPos);
+                    if (hit2 != null)
+                        BeginTextEdit(new Point(InkCanvas.GetLeft(hit2), InkCanvas.GetTop(hit2)), hit2);
+                    return;
+                }
+
+                // No active edit: click on existing TextBlock → re-edit; else create new
+                TextBlock hitBlock = FindTextBlockAt(clickPos);
+                if (hitBlock != null)
+                    BeginTextEdit(new Point(InkCanvas.GetLeft(hitBlock), InkCanvas.GetTop(hitBlock)), hitBlock);
+                else
+                    BeginTextEdit(clickPos);
+
+                e.Handled = true;
                 return;
             }
 
@@ -637,6 +1712,7 @@ namespace DrawClient.Views.UserControls
                 MyCanvas.CaptureMouse();
                 UpdateEraserCursor(lastPoint);
                 if (EraserCursor != null) EraserCursor.Visibility = Visibility.Visible;
+                _viewModel.BeginStroke(); // group erase segments of this drag
                 return;
             }
 
@@ -651,11 +1727,14 @@ namespace DrawClient.Views.UserControls
             }
 
             // XỬ LÝ KHI VẼ BÚT BÌNH THƯỜNG
+            // PreviewMouseDown đã set isDrawing=true và BeginStroke() rồi.
+            // InkCanvas ở Ink mode tự quản lý mouse capture nội bộ — không gọi CaptureMouse()
+            // ở đây để tránh xung đột với stylus plugin, gây mất nét đầu tiên.
             if (_viewModel.CurrentEditingMode == InkCanvasEditingMode.Ink)
             {
                 isDrawing = true;
                 lastPoint = e.GetPosition(MyCanvas);
-                MyCanvas.CaptureMouse();
+                // Không gọi CaptureMouse() và BeginStroke() lại — đã được xử lý ở PreviewMouseDown
             }
         }
         private void Canvas_MouseMove(object sender, MouseEventArgs e)
@@ -694,10 +1773,6 @@ namespace DrawClient.Views.UserControls
             string tool = _viewModel.SelectedTool?.ToLowerInvariant();
             string penType = _viewModel.Toolbar.CurrentPenType?.ToLowerInvariant();
             bool isEraser = _viewModel.Toolbar.IsEraserSelected || tool == "eraser";
-            if (_viewModel.SelectedTool == "eraser")
-            {
-                _viewModel.SendDrawData(lastPoint, currentPoint);
-            }
 
             // 1. CHẾ ĐỘ VẼ HÌNH (SHAPE MODE)
             if (isShapeDrawing)
@@ -743,7 +1818,23 @@ namespace DrawClient.Views.UserControls
                     new Point[] { lastPoint, currentPoint },
                     new EllipseStylusShape(_viewModel.Toolbar.EraserSize, _viewModel.Toolbar.EraserSize));
 
-                // FIX: Gửi lệnh ERASE lên server (không phải DRAW)
+                // Track local erase for undo first to capture IDs for sync
+                var eraseAction = new DrawAction(
+                    "ERASE",
+                    lastPoint,
+                    currentPoint,
+                    "#ERASE",
+                    _viewModel.Toolbar.EraserSize,
+                    ClientSocket.Instance.CurrentUserId,
+                    ClientSocket.Instance.CurrentUsername,
+                    _viewModel.RoomId)
+                {
+                    StrokeGroupId = _viewModel.CurrentStrokeGroupId
+                };
+                _viewModel.UndoRedoManager.AddAction(eraseAction);
+                _viewModel.UpdateHistoryUI();
+
+                // Gửi lệnh ERASE lên server kèm actionId/strokeGroupId để undo sync
                 var eraseMsg = new DrawMessage
                 {
                     type = "ERASE",
@@ -755,7 +1846,9 @@ namespace DrawClient.Views.UserControls
                     x2 = currentPoint.X,
                     y2 = currentPoint.Y,
                     thickness = _viewModel.Toolbar.EraserSize,
-                    color = "#ERASE"
+                    color = "#ERASE",
+                    actionId = eraseAction.Id,
+                    strokeGroupId = eraseAction.StrokeGroupId
                 };
                 ClientSocket.Instance.Send(eraseMsg);
 
@@ -767,9 +1860,10 @@ namespace DrawClient.Views.UserControls
             }
 
             // 3. CHẾ ĐỘ VẼ BÚT THƯỜNG (NORMAL DRAW / PENCIL)
-            if (_viewModel.Toolbar.IsPencilSelected && e.LeftButton == MouseButtonState.Pressed)
+            // Kiểm tra isDrawing để tránh gửi nét thừa khi chuột kéo từ ngoài vào canvas
+            // mà không qua MouseDown (lastPoint sẽ có giá trị cũ từ nét trước).
+            if (_viewModel.Toolbar.IsPencilSelected && isDrawing && e.LeftButton == MouseButtonState.Pressed)
             {
-                // SendDrawData() now handles [HL] prefix internally
                 _viewModel.SendDrawData(lastPoint, currentPoint);
                 lastPoint = currentPoint;
             }
@@ -808,21 +1902,37 @@ namespace DrawClient.Views.UserControls
             if (isDrawing)
             {
                 isDrawing = false;
+                // Lưu group ID TRƯỚC khi EndStroke() xóa nó — dùng cho eraser click và StrokeCollected
+                _lastStrokeGroupId = _viewModel?.CurrentStrokeGroupId;
+                // Không gọi EndStroke() ở đây — SendDrawData phía dưới cần CurrentStrokeGroupId còn hợp lệ
 
                 Point endPoint = e.GetPosition(MyCanvas);
 
-                // Nếu chỉ nhấp chuột (click) mà không rê chuột, tạo ra một nét vẽ li ti để đồng bộ
                 if (Math.Abs(endPoint.X - _startPoint.X) < 1 && Math.Abs(endPoint.Y - _startPoint.Y) < 1)
                 {
-                    // Tăng offset nhỏ để vượt ngưỡng lọc trong SendDrawData và đảm bảo
-                    // điểm click (dot) được gửi tới server khi người dùng chỉ click.
                     Point tinyMove = new Point(endPoint.X + 1.0, endPoint.Y + 1.0);
 
                     bool isEraserClick = _viewModel.Toolbar.IsEraserSelected || _viewModel.SelectedTool?.ToLowerInvariant() == "eraser";
 
                     if (isEraserClick)
                     {
-                        var eraseMsg = new DrawMessage
+                        var eraseClickAction = new DrawAction(
+                            "ERASE",
+                            endPoint,
+                            tinyMove,
+                            "#ERASE",
+                            _viewModel.Toolbar.EraserSize,
+                            ClientSocket.Instance.CurrentUserId,
+                            ClientSocket.Instance.CurrentUsername,
+                            _viewModel.RoomId)
+                        {
+                            // Dùng group ID đã lưu để eraser click thuộc cùng nhóm với drag
+                            StrokeGroupId = _lastStrokeGroupId
+                        };
+                        _viewModel.UndoRedoManager.AddAction(eraseClickAction);
+                        _viewModel.UpdateHistoryUI();
+
+                        ClientSocket.Instance.Send(new DrawMessage
                         {
                             type = "ERASE",
                             roomId = _viewModel.RoomId,
@@ -833,16 +1943,20 @@ namespace DrawClient.Views.UserControls
                             x2 = tinyMove.X,
                             y2 = tinyMove.Y,
                             thickness = _viewModel.Toolbar.EraserSize,
-                            color = "#ERASE"
-                        };
-                        ClientSocket.Instance.Send(eraseMsg);
+                            color = "#ERASE",
+                            actionId = eraseClickAction.Id,
+                            strokeGroupId = eraseClickAction.StrokeGroupId
+                        });
                     }
                     else if (_viewModel.CurrentEditingMode == InkCanvasEditingMode.Ink)
                     {
-                        // Đồng bộ mọi công cụ vẽ Ink (pencil, highlighter, fountain, ...)
+                        // CurrentStrokeGroupId vẫn hợp lệ vì EndStroke() chưa được gọi
                         _viewModel.SendDrawData(endPoint, tinyMove);
                     }
                 }
+
+                // Gọi EndStroke() SAU khi đã gửi tất cả dữ liệu để StrokeGroupId được gán đúng
+                _viewModel?.EndStroke();
 
                 if (EraserCursor != null)
                 {
@@ -865,30 +1979,45 @@ namespace DrawClient.Views.UserControls
                 string penType =
                     _viewModel?.Toolbar?.CurrentPenType?.ToLowerInvariant();
 
-                // XÓA PREVIEW STROKE CŨ
+                // Lưu ref stroke cuối trước khi null để map vào DrawAction
+                Stroke finalShapeStroke = _currentTempStroke;
                 _currentTempStroke = null;
-                //vẽ local
-                // GỬI QUA SERVER
+                // Track local shape for undo first to capture ID for sync
+                var shapeAction = new DrawAction(
+                    "SHAPE",
+                    _startPoint,
+                    endPoint,
+                    _viewModel.Toolbar.CurrentShapeColor,
+                    _viewModel.Toolbar.CurrentShapeThickness,
+                    ClientSocket.Instance.CurrentUserId,
+                    ClientSocket.Instance.CurrentUsername,
+                    _viewModel.RoomId)
+                {
+                    ShapeType = penType
+                };
+                _viewModel.UndoRedoManager.AddAction(shapeAction);
+                _viewModel.UpdateHistoryUI();
+
+                // Map stroke cuối (preview) sang shapeAction để SyncSelectionTransform cập nhật đúng coords
+                if (finalShapeStroke != null)
+                    _strokeToAction[finalShapeStroke] = shapeAction;
+
+                // GỬI QUA SERVER kèm actionId để undo sync
                 ClientSocket.Instance.Send(new DrawMessage
                 {
                     type = "SHAPE",
-
                     roomId = _viewModel.RoomId,
-
                     userId = ClientSocket.Instance.CurrentUserId,
-
                     username = ClientSocket.Instance.CurrentUsername,
-
                     shapeType = penType,
-
                     x1 = _startPoint.X,
                     y1 = _startPoint.Y,
-
                     x2 = endPoint.X,
                     y2 = endPoint.Y,
-
                     color = _viewModel.Toolbar.CurrentShapeColor,
-                    thickness = _viewModel.Toolbar.CurrentShapeThickness
+                    thickness = _viewModel.Toolbar.CurrentShapeThickness,
+                    actionId = shapeAction.Id,
+                    strokeGroupId = shapeAction.StrokeGroupId
                 });
 
                 isShapeDrawing = false;
@@ -986,6 +2115,10 @@ namespace DrawClient.Views.UserControls
         private void InkCanvas_MouseMove(object sender, MouseEventArgs e)
         {
             if (_viewModel?.Toolbar?.CurrentPenType?.ToLower() != "laser")
+                return;
+
+            // Only render laser when the pen tool is active (not select, eraser, shape, etc.)
+            if (_viewModel?.SelectedTool?.ToLowerInvariant() != "pen")
                 return;
 
             Point p = e.GetPosition(laserCanvas);
@@ -1228,7 +2361,7 @@ namespace DrawClient.Views.UserControls
             }
         }
 
-        private void DrawNetworkLine(Point start, Point end, string colorStr, double thickness, string penType, bool isSync)
+        private void DrawNetworkLine(Point start, Point end, string colorStr, double thickness, string penType, bool isSync, string strokeGroupId = null)
         {
             Application.Current.Dispatcher.Invoke(() =>
             {
@@ -1237,20 +2370,23 @@ namespace DrawClient.Views.UserControls
                     // 1. KIỂM TRA LỆNH XÓA VÀ XỬ LÝ AN TOÀN
                     if (colorStr == "#ERASE" || penType?.Equals("eraser", StringComparison.OrdinalIgnoreCase) == true || penType?.Equals("ERASE", StringComparison.OrdinalIgnoreCase) == true)
                     {
-                        // Đảm bảo độ dày xóa luôn lớn hơn 0 (tránh văng lỗi EllipseStylusShape)
                         double safeThickness = Math.Max(2.0, thickness);
-
-                        // Nếu click tại chỗ (điểm đầu = điểm cuối), WPF sẽ không xóa, ta cần tạo 1 độ lệch cực nhỏ
                         if (start.X == end.X && start.Y == end.Y)
-                        {
                             end = new Point(start.X + 0.1, start.Y + 0.1);
-                        }
-
-                        MyCanvas.Strokes.Erase(
-                            new Point[] { start, end },
-                            new EllipseStylusShape(safeThickness, safeThickness));
-                        return; // THOÁT LUÔN
+                        MyCanvas.Strokes.Erase(new Point[] { start, end }, new EllipseStylusShape(safeThickness, safeThickness));
+                        return;
                     }
+
+                    // 2. Nếu có strokeGroupId, tích lũy điểm vào stroke đã tạo cho group này
+                    //    thay vì tạo nhiều stroke rời — giúp index khớp với native InkCanvas stroke
+                    if (!string.IsNullOrEmpty(strokeGroupId) &&
+                        _networkGroupStrokes.TryGetValue(strokeGroupId, out var existingStroke) &&
+                        MyCanvas.Strokes.Contains(existingStroke))
+                    {
+                        existingStroke.StylusPoints.Add(new StylusPoint(end.X, end.Y));
+                        return;
+                    }
+
                     string incomingPenType = penType?.Trim();
                     bool isHighlighter = string.Equals(incomingPenType, "highlighter", StringComparison.OrdinalIgnoreCase)
                                          || (colorStr?.StartsWith("[HL]") == true);
@@ -1260,10 +2396,10 @@ namespace DrawClient.Views.UserControls
                     Color parsedColor = (Color)ColorConverter.ConvertFromString(colorToUse);
 
                     StylusPointCollection points = new StylusPointCollection
-            {
-                new StylusPoint(start.X, start.Y),
-                new StylusPoint(end.X, end.Y)
-            };
+                    {
+                        new StylusPoint(start.X, start.Y),
+                        new StylusPoint(end.X, end.Y)
+                    };
 
                     DrawingAttributes da = new DrawingAttributes
                     {
@@ -1272,7 +2408,6 @@ namespace DrawClient.Views.UserControls
                         IsHighlighter = isHighlighter
                     };
 
-                    // Cấu hình nét vẽ thời gian thực từ mạng truyền về
                     if (isHighlighter)
                     {
                         da.Width = thickness * 1.5;
@@ -1298,6 +2433,10 @@ namespace DrawClient.Views.UserControls
 
                     Stroke stroke = new Stroke(points) { DrawingAttributes = da };
                     MyCanvas.Strokes.Add(stroke);
+
+                    // 3. Đăng ký stroke này để các segment tiếp theo của cùng group được tích lũy vào
+                    if (!string.IsNullOrEmpty(strokeGroupId))
+                        _networkGroupStrokes[strokeGroupId] = stroke;
                 }
                 catch (Exception ex)
                 {
@@ -1442,6 +2581,17 @@ namespace DrawClient.Views.UserControls
                 };
 
                 MyCanvas.Strokes.Add(stroke);
+
+                // Map stroke → DrawAction để SyncSelectionTransform có thể ghi TRANSFORM action khi move
+                if (!string.IsNullOrEmpty(msg.actionId) && _viewModel != null)
+                {
+                    var action = _viewModel.UndoRedoManager.GetActionById(msg.actionId);
+                    if (action != null)
+                    {
+                        _strokeToAction[stroke] = action;
+                        _actionIdToStroke[action.Id] = stroke;
+                    }
+                }
             });
         }
         private void DrawText(DrawMessage msg)
@@ -1451,9 +2601,9 @@ namespace DrawClient.Views.UserControls
                 TextBlock tb = new TextBlock
                 {
                     Text = msg.text,
-                    FontSize = msg.fontSize,
-                    Foreground = new SolidColorBrush((Color)ColorConverter.ConvertFromString(msg.color)),
-
+                    FontSize = msg.fontSize > 0 ? msg.fontSize : 14,
+                    FontFamily = new FontFamily(!string.IsNullOrEmpty(msg.fontFamily) ? msg.fontFamily : "Roboto"),
+                    Foreground = new SolidColorBrush((Color)ColorConverter.ConvertFromString(msg.color ?? "#000000")),
                     Background = Brushes.Transparent
                 };
 
@@ -1461,6 +2611,17 @@ namespace DrawClient.Views.UserControls
                 InkCanvas.SetTop(tb, msg.y1);
 
                 MyCanvas.Children.Add(tb);
+
+                // Map TextBlock tới action để SyncSelectionTransform và ApplyTransformActionToCanvas hoạt động đúng
+                if (!string.IsNullOrEmpty(msg.actionId) && _viewModel != null)
+                {
+                    var textAct = _viewModel.UndoRedoManager.GetActionById(msg.actionId);
+                    if (textAct != null)
+                    {
+                        _childToAction[tb] = textAct;
+                        _actionIdToChild[textAct.Id] = tb;
+                    }
+                }
 
                 if (msg.x2 > 0 && msg.y2 > 0)
                 {
@@ -1524,6 +2685,390 @@ namespace DrawClient.Views.UserControls
                 }
             }
         }
+        // ============================================================
+        // TEXT TOOL — ComboBox selection handlers (called from XAML)
+        // ============================================================
+        private void FontFamilyCombo_SelectionChanged(object sender, SelectionChangedEventArgs e)
+        {
+            if (DataContext is CanvasViewModel vm && sender is ComboBox cb)
+            {
+                var item = cb.SelectedItem as ComboBoxItem;
+                if (item != null)
+                    vm.Toolbar.CurrentTextFont = item.Tag?.ToString() ?? item.Content?.ToString() ?? "Roboto";
+            }
+        }
+
+        private void FontSizeCombo_SelectionChanged(object sender, SelectionChangedEventArgs e)
+        {
+            if (DataContext is CanvasViewModel vm && sender is ComboBox cb)
+            {
+                var item = cb.SelectedItem as ComboBoxItem;
+                if (item != null)
+                {
+                    string raw = item.Content?.ToString()?.Replace("pt", "").Trim() ?? "16";
+                    if (double.TryParse(raw, out double size))
+                        vm.Toolbar.CurrentTextSize = size;
+                }
+            }
+        }
+
+        // ============================================================
+        // TEXT TOOL — Inline editing helpers
+        // ============================================================
+
+        private TextBlock FindTextBlockAt(Point canvasPos)
+        {
+            foreach (var child in MyCanvas.Children.OfType<TextBlock>().ToList())
+            {
+                double left = InkCanvas.GetLeft(child);
+                double top = InkCanvas.GetTop(child);
+                if (double.IsNaN(left)) left = 0;
+                if (double.IsNaN(top)) top = 0;
+                child.Measure(new Size(double.PositiveInfinity, double.PositiveInfinity));
+                var bounds = new Rect(left, top, Math.Max(child.DesiredSize.Width + 4, 20), Math.Max(child.DesiredSize.Height + 4, 20));
+                if (bounds.Contains(canvasPos)) return child;
+            }
+            return null;
+        }
+
+        private void BeginTextEdit(Point canvasPos, TextBlock existing = null)
+        {
+            if (_activeTextBox != null) CommitTextEdit();
+
+            double fontSize = _viewModel.Toolbar.CurrentTextSize;
+            string fontFamily = _viewModel.Toolbar.CurrentTextFont;
+            string color = _viewModel.Toolbar.CurrentTextColor;
+            string initialText = "";
+
+            if (existing != null)
+            {
+                fontSize = existing.FontSize;
+                fontFamily = existing.FontFamily?.Source ?? fontFamily;
+                if (existing.Foreground is SolidColorBrush scb)
+                    color = $"#{scb.Color.R:X2}{scb.Color.G:X2}{scb.Color.B:X2}";
+                initialText = existing.Text;
+                _editingExistingBlock = existing;
+                MyCanvas.Children.Remove(existing);
+            }
+
+            _activeTextBox = new TextBox
+            {
+                Text = initialText,
+                FontSize = fontSize,
+                FontFamily = new FontFamily(fontFamily),
+                Foreground = new SolidColorBrush((Color)ColorConverter.ConvertFromString(color)),
+                Background = Brushes.Transparent,
+                BorderThickness = new Thickness(0),
+                MinWidth = 160,
+                Padding = new Thickness(6, 4, 6, 4),
+                AcceptsReturn = false,
+                TextWrapping = TextWrapping.Wrap,
+                CaretBrush = new SolidColorBrush(Colors.Black),
+                VerticalScrollBarVisibility = ScrollBarVisibility.Disabled,
+                HorizontalScrollBarVisibility = ScrollBarVisibility.Disabled
+            };
+            _activeTextBox.LostFocus += ActiveTextBox_LostFocus;
+            _activeTextBox.KeyDown += ActiveTextBox_KeyDown;
+
+            _activeTextWrapper = new Border
+            {
+                BorderBrush = new SolidColorBrush(Color.FromRgb(26, 115, 232)),
+                BorderThickness = new Thickness(1.5),
+                Background = new SolidColorBrush(Color.FromArgb(18, 26, 115, 232)),
+                MinWidth = 160,
+                MinHeight = 36,
+                Child = _activeTextBox
+            };
+
+            InkCanvas.SetLeft(_activeTextWrapper, canvasPos.X);
+            InkCanvas.SetTop(_activeTextWrapper, canvasPos.Y);
+            MyCanvas.Children.Add(_activeTextWrapper);
+
+            ShowTextToolbar(canvasPos, fontSize);
+
+            Dispatcher.InvokeAsync(() =>
+            {
+                _activeTextBox.Focus();
+                if (!string.IsNullOrEmpty(initialText)) _activeTextBox.SelectAll();
+            }, DispatcherPriority.Input);
+        }
+
+        private void ShowTextToolbar(Point canvasPos, double fontSize)
+        {
+            RemoveTextToolbar();
+            OverlayCanvas.IsHitTestVisible = true;
+
+            var panel = new StackPanel { Orientation = Orientation.Horizontal, VerticalAlignment = VerticalAlignment.Center };
+
+            panel.Children.Add(MakeTextToolbarButton("A−", () =>
+            {
+                if (_activeTextBox == null) return;
+                _viewModel.Toolbar.CurrentTextSize = Math.Max(8, _viewModel.Toolbar.CurrentTextSize - 2);
+                _activeTextBox.FontSize = _viewModel.Toolbar.CurrentTextSize;
+                UpdateToolbarSizeLabel();
+            }));
+
+            var sizeLabel = new TextBlock
+            {
+                Text = $"{fontSize:0}",
+                FontSize = 12,
+                Foreground = new SolidColorBrush(Colors.Black),
+                VerticalAlignment = VerticalAlignment.Center,
+                Margin = new Thickness(2, 0, 2, 0),
+                MinWidth = 22,
+                TextAlignment = TextAlignment.Center,
+                Tag = "sizeLabel"
+            };
+            panel.Children.Add(sizeLabel);
+
+            panel.Children.Add(MakeTextToolbarButton("A+", () =>
+            {
+                if (_activeTextBox == null) return;
+                _viewModel.Toolbar.CurrentTextSize = Math.Min(72, _viewModel.Toolbar.CurrentTextSize + 2);
+                _activeTextBox.FontSize = _viewModel.Toolbar.CurrentTextSize;
+                UpdateToolbarSizeLabel();
+            }));
+
+            panel.Children.Add(new Border
+            {
+                Width = 1, Height = 18,
+                Background = new SolidColorBrush(Color.FromRgb(218, 220, 224)),
+                Margin = new Thickness(6, 0, 6, 0),
+                IsHitTestVisible = false
+            });
+
+            // Color picker button — shows current text color; click opens ColorDialog
+            string initHex = "#000000";
+            if (_activeTextBox?.Foreground is SolidColorBrush initScb)
+                initHex = $"#{initScb.Color.R:X2}{initScb.Color.G:X2}{initScb.Color.B:X2}";
+            _colorIndicatorBtn = new Border
+            {
+                Width = 22, Height = 22,
+                CornerRadius = new CornerRadius(11),
+                Background = new SolidColorBrush((Color)ColorConverter.ConvertFromString(initHex)),
+                BorderBrush = new SolidColorBrush(Color.FromRgb(180, 180, 180)),
+                BorderThickness = new Thickness(1.5),
+                Cursor = Cursors.Hand,
+                Margin = new Thickness(0, 0, 4, 0),
+                ToolTip = "Đổi màu chữ"
+            };
+            _colorIndicatorBtn.MouseLeftButtonUp += (s, ev) =>
+            {
+                ev.Handled = true;
+                if (_activeTextBox == null) return;
+                _colorPickerOpen = true;
+                var dlg = new System.Windows.Forms.ColorDialog { FullOpen = true };
+                if (_activeTextBox.Foreground is SolidColorBrush scb2)
+                    dlg.Color = System.Drawing.Color.FromArgb(scb2.Color.R, scb2.Color.G, scb2.Color.B);
+                bool ok = dlg.ShowDialog() == System.Windows.Forms.DialogResult.OK;
+                _colorPickerOpen = false;
+                if (ok && _activeTextBox != null)
+                {
+                    var dc = dlg.Color;
+                    var wpfColor = Color.FromRgb(dc.R, dc.G, dc.B);
+                    _activeTextBox.Foreground = new SolidColorBrush(wpfColor);
+                    if (_colorIndicatorBtn != null)
+                        _colorIndicatorBtn.Background = new SolidColorBrush(wpfColor);
+                    _activeTextBox.Focus();
+                }
+            };
+            panel.Children.Add(_colorIndicatorBtn);
+
+            panel.Children.Add(new Border
+            {
+                Width = 1, Height = 18,
+                Background = new SolidColorBrush(Color.FromRgb(218, 220, 224)),
+                Margin = new Thickness(2, 0, 6, 0),
+                IsHitTestVisible = false
+            });
+
+            panel.Children.Add(MakeTextToolbarButton("Delete", () => DeleteTextEdit()));
+
+            _textFloatingToolbar = new Border
+            {
+                Background = Brushes.White,
+                CornerRadius = new CornerRadius(6),
+                Padding = new Thickness(8, 5, 8, 5),
+                BorderBrush = new SolidColorBrush(Color.FromRgb(218, 220, 224)),
+                BorderThickness = new Thickness(1),
+                Child = panel
+            };
+            _textFloatingToolbar.Effect = new System.Windows.Media.Effects.DropShadowEffect
+            {
+                BlurRadius = 6, ShadowDepth = 1, Opacity = 0.15, Color = Colors.Black
+            };
+
+            RepositionTextToolbar(canvasPos.X, canvasPos.Y);
+            OverlayCanvas.Children.Add(_textFloatingToolbar);
+        }
+
+        private void RepositionTextToolbar(double wrapperLeft, double wrapperTop)
+        {
+            if (_textFloatingToolbar == null) return;
+            _textFloatingToolbar.Measure(new Size(double.PositiveInfinity, double.PositiveInfinity));
+            double tbH = _textFloatingToolbar.DesiredSize.Height > 0 ? _textFloatingToolbar.DesiredSize.Height : 34;
+            double y = wrapperTop - tbH - 6;
+            if (y < 4) y = wrapperTop + (_activeTextWrapper?.ActualHeight ?? 40) + 6;
+            System.Windows.Controls.Canvas.SetLeft(_textFloatingToolbar, wrapperLeft);
+            System.Windows.Controls.Canvas.SetTop(_textFloatingToolbar, y);
+        }
+
+        private void UpdateToolbarSizeLabel()
+        {
+            if (_textFloatingToolbar?.Child is StackPanel p)
+            {
+                var lbl = p.Children.OfType<TextBlock>().FirstOrDefault(tb => tb.Tag?.ToString() == "sizeLabel");
+                if (lbl != null) lbl.Text = $"{_viewModel.Toolbar.CurrentTextSize:0}";
+            }
+        }
+
+        private Button MakeTextToolbarButton(string label, Action onClick)
+        {
+            var btn = new Button
+            {
+                Content = label,
+                Focusable = false,
+                Background = Brushes.Transparent,
+                BorderThickness = new Thickness(0),
+                Cursor = Cursors.Hand,
+                Padding = new Thickness(6, 2, 6, 2),
+                FontSize = 12,
+                Foreground = new SolidColorBrush(Color.FromRgb(60, 64, 67))
+            };
+            btn.Click += (s, e) => { onClick(); e.Handled = true; };
+            return btn;
+        }
+
+        private void RemoveTextToolbar()
+        {
+            if (_textFloatingToolbar != null)
+            {
+                OverlayCanvas.Children.Remove(_textFloatingToolbar);
+                _textFloatingToolbar = null;
+            }
+            OverlayCanvas.IsHitTestVisible = false;
+        }
+
+        private void CommitTextEdit()
+        {
+            if (_activeTextBox == null) return;
+
+            var tbRef = _activeTextBox;
+            var wrapRef = _activeTextWrapper;
+            _activeTextBox = null;
+            _activeTextWrapper = null;
+
+            string text = tbRef.Text?.Trim() ?? "";
+            double left = InkCanvas.GetLeft(wrapRef);
+            double top = InkCanvas.GetTop(wrapRef);
+            if (double.IsNaN(left)) left = 0;
+            if (double.IsNaN(top)) top = 0;
+
+            MyCanvas.Children.Remove(wrapRef);
+            RemoveTextToolbar();
+            _editingExistingBlock = null;
+
+            if (!string.IsNullOrWhiteSpace(text))
+            {
+                double fontSize = tbRef.FontSize;
+                string fontFam = tbRef.FontFamily?.Source ?? _viewModel.Toolbar.CurrentTextFont;
+                string color = tbRef.Foreground is SolidColorBrush scb
+                    ? $"#{scb.Color.R:X2}{scb.Color.G:X2}{scb.Color.B:X2}"
+                    : _viewModel.Toolbar.CurrentTextColor;
+
+                var rendered = new TextBlock
+                {
+                    Text = text,
+                    FontSize = fontSize,
+                    FontFamily = new FontFamily(fontFam),
+                    Foreground = new SolidColorBrush((Color)ColorConverter.ConvertFromString(color)),
+                    Background = Brushes.Transparent,
+                    TextWrapping = TextWrapping.Wrap,
+                    Cursor = Cursors.IBeam
+                };
+                InkCanvas.SetLeft(rendered, left);
+                InkCanvas.SetTop(rendered, top);
+                MyCanvas.Children.Add(rendered);
+
+                var textAction = _viewModel.SendText(text, new Point(left, top), 0, 0, fontSize, fontFam, color);
+                if (textAction != null)
+                {
+                    _childToAction[rendered] = textAction;
+                    _actionIdToChild[textAction.Id] = rendered;
+                }
+            }
+        }
+
+        private void CancelTextEdit()
+        {
+            if (_activeTextWrapper != null)
+                MyCanvas.Children.Remove(_activeTextWrapper);
+            RemoveTextToolbar();
+
+            if (_editingExistingBlock != null)
+                MyCanvas.Children.Add(_editingExistingBlock);
+
+            _activeTextBox = null;
+            _activeTextWrapper = null;
+            _editingExistingBlock = null;
+            _colorIndicatorBtn = null;
+        }
+
+        private void DeleteTextEdit()
+        {
+            var wrapRef = _activeTextWrapper;
+            var existingRef = _editingExistingBlock;
+            double posX = 0, posY = 0;
+            string existingText = existingRef?.Text;
+
+            if (wrapRef != null)
+            {
+                posX = InkCanvas.GetLeft(wrapRef);
+                posY = InkCanvas.GetTop(wrapRef);
+                if (double.IsNaN(posX)) posX = 0;
+                if (double.IsNaN(posY)) posY = 0;
+            }
+
+            // Clear state first so LostFocus doesn't trigger CommitTextEdit
+            _activeTextBox = null;
+            _activeTextWrapper = null;
+            _editingExistingBlock = null;
+            _colorIndicatorBtn = null;
+
+            if (wrapRef != null)
+                MyCanvas.Children.Remove(wrapRef);
+            RemoveTextToolbar();
+
+            // If we were editing an existing block, delete it from the network too
+            if (existingRef != null && !string.IsNullOrEmpty(existingText) && _viewModel != null)
+                _viewModel.SendDeleteText(posX, posY, existingText);
+        }
+
+        private void ActiveTextBox_LostFocus(object sender, RoutedEventArgs e)
+        {
+            if (_colorPickerOpen) return;
+            var tbSender = (TextBox)sender;
+            Dispatcher.InvokeAsync(() =>
+            {
+                if (_activeTextBox == tbSender && !tbSender.IsKeyboardFocusWithin)
+                    CommitTextEdit();
+            }, DispatcherPriority.Background);
+        }
+
+        private void ActiveTextBox_KeyDown(object sender, KeyEventArgs e)
+        {
+            if (e.Key == Key.Escape)
+            {
+                CancelTextEdit();
+                e.Handled = true;
+            }
+            else if (e.Key == Key.Return && (Keyboard.Modifiers & ModifierKeys.Shift) == 0)
+            {
+                CommitTextEdit();
+                e.Handled = true;
+            }
+        }
+
         // Hàm mở bảng màu khi click dấu (+)
         private void OpenColorPicker_Click(object sender, RoutedEventArgs e)
         {
@@ -1660,77 +3205,129 @@ namespace DrawClient.Views.UserControls
 
         private void HandleRemoteSelectionTransform(string json)
         {
-            Application.Current.Dispatcher.Invoke(() =>
+            // Always called from UI thread (via InvokeUI or Dispatcher.Invoke at the call site)
+            try
             {
-                try
+                using (var doc = System.Text.Json.JsonDocument.Parse(json))
                 {
-                    using (var doc = System.Text.Json.JsonDocument.Parse(json))
+                    var root = doc.RootElement;
+
+                    if (!root.TryGetProperty("text", out var textEl) || string.IsNullOrEmpty(textEl.GetString()))
+                        return;
+
+                    string transformData = textEl.GetString();
+                    var parts = transformData.Split('|');
+                    // Hỗ trợ cả format cũ (3 phần) và mới (4 phần có childIndices)
+                    if (parts.Length < 3) return;
+
+                    var oldB = parts[1].Split(',').Select(s => double.Parse(s, System.Globalization.CultureInfo.InvariantCulture)).ToArray();
+                    var newB = parts[2].Split(',').Select(s => double.Parse(s, System.Globalization.CultureInfo.InvariantCulture)).ToArray();
+
+                    Rect oldBounds = new Rect(oldB[0], oldB[1], oldB[2], oldB[3]);
+                    Rect newBounds = new Rect(newB[0], newB[1], newB[2], newB[3]);
+
+                    double scaleX = oldBounds.Width > 0 ? newBounds.Width / oldBounds.Width : 1;
+                    double scaleY = oldBounds.Height > 0 ? newBounds.Height / oldBounds.Height : 1;
+                    double offsetX = newBounds.X - (oldBounds.X * scaleX);
+                    double offsetY = newBounds.Y - (oldBounds.Y * scaleY);
+
+                    var matrix = new Matrix();
+                    matrix.Scale(scaleX, scaleY);
+                    matrix.Translate(offsetX, offsetY);
+
+                    StrokeCollection strokesToTransform = new StrokeCollection();
+                    // Ghi nhận để Phase 3 của RedrawAllFromActions tái áp dụng sau undo/redo
+                    var ntEntry = new NetworkTransformEntry { Matrix = matrix };
+
+                    if (!string.IsNullOrWhiteSpace(parts[0]))
                     {
-                        var root = doc.RootElement;
-
-                        // Xử lý chuẩn mới: "text" chứa chuỗi "indices|oldBounds|newBounds"
-                        if (root.TryGetProperty("text", out var textEl) && !string.IsNullOrEmpty(textEl.GetString()))
+                        foreach (string id in parts[0].Split(','))
                         {
-                            string transformData = textEl.GetString();
-                            var parts = transformData.Split('|');
+                            string trimmedId = id.Trim();
+                            if (string.IsNullOrEmpty(trimmedId)) continue;
 
-                            if (parts.Length == 3)
+                            if (trimmedId.StartsWith("G:"))
                             {
-                                // Lấy mảng index các nét vẽ bị thay đổi
-                                var indices = parts[0].Split(',').Select(int.Parse).ToList();
+                                string gid = trimmedId.Substring(2);
+                                // Lưu vào entry để Phase 3 biết nhóm nào cần transform
+                                if (!ntEntry.StrokeGroupIds.Contains(gid))
+                                    ntEntry.StrokeGroupIds.Add(gid);
 
-                                // Lấy tọa độ hộp cũ và hộp mới (Ép kiểu InvariantCulture để tránh lỗi dấu chấm/phẩy)
-                                var oldB = parts[1].Split(',').Select(s => double.Parse(s, System.Globalization.CultureInfo.InvariantCulture)).ToArray();
-                                var newB = parts[2].Split(',').Select(s => double.Parse(s, System.Globalization.CultureInfo.InvariantCulture)).ToArray();
-
-                                Rect oldBounds = new Rect(oldB[0], oldB[1], oldB[2], oldB[3]);
-                                Rect newBounds = new Rect(newB[0], newB[1], newB[2], newB[3]);
-
-                                // Tính toán tỉ lệ Scale và khoảng dịch chuyển Translate
-                                double scaleX = oldBounds.Width > 0 ? newBounds.Width / oldBounds.Width : 1;
-                                double scaleY = oldBounds.Height > 0 ? newBounds.Height / oldBounds.Height : 1;
-
-                                double offsetX = newBounds.X - (oldBounds.X * scaleX);
-                                double offsetY = newBounds.Y - (oldBounds.Y * scaleY);
-
-                                // Thiết lập ma trận biến đổi
-                                var matrix = new Matrix();
-                                matrix.Scale(scaleX, scaleY);
-                                matrix.Translate(offsetX, offsetY);
-
-                                // Tìm chính xác các nét vẽ theo Index để áp dụng thay đổi
-                                StrokeCollection strokesToTransform = new StrokeCollection();
-                                foreach (int idx in indices)
+                                bool addedNet = false;
+                                if (_networkGroupStrokes.TryGetValue(gid, out var netStroke))
                                 {
-                                    if (idx >= 0 && idx < MyCanvas.Strokes.Count)
+                                    if (MyCanvas.Strokes.Contains(netStroke))
                                     {
-                                        strokesToTransform.Add(MyCanvas.Strokes[idx]);
+                                        strokesToTransform.Add(netStroke);
+                                        addedNet = true;
                                     }
                                 }
-
-                                if (strokesToTransform.Count > 0)
+                                if (!addedNet && _groupNativeStrokes.TryGetValue(gid, out var nativeList))
                                 {
-                                    // TẠM THỜI TẮT EVENT để canvas không hiểu nhầm máy nhận đang tự kéo chuột
-                                    // và gửi ngược lại dữ liệu lên server gây vòng lặp vô hạn (Infinite Loop)
-                                    MyCanvas.SelectionMoved -= MyCanvas_SelectionMoved;
-                                    MyCanvas.SelectionResized -= MyCanvas_SelectionResized;
-
-                                    // Áp dụng ma trận biến đổi
-                                    strokesToTransform.Transform(matrix, false);
-
-                                    // Bật lại event
-                                    MyCanvas.SelectionMoved += MyCanvas_SelectionMoved;
-                                    MyCanvas.SelectionResized += MyCanvas_SelectionResized;
+                                    foreach (var ns in nativeList)
+                                    {
+                                        if (MyCanvas.Strokes.Contains(ns))
+                                            strokesToTransform.Add(ns);
+                                    }
+                                    addedNet = true;
                                 }
+                                if (!addedNet && _actionIdToStroke.TryGetValue(gid, out var actionStroke))
+                                {
+                                    if (MyCanvas.Strokes.Contains(actionStroke))
+                                        strokesToTransform.Add(actionStroke);
+                                }
+                            }
+                            else if (int.TryParse(trimmedId, out int idx))
+                            {
+                                if (idx >= 0 && idx < MyCanvas.Strokes.Count)
+                                    strokesToTransform.Add(MyCanvas.Strokes[idx]);
                             }
                         }
                     }
+
+                    if (strokesToTransform.Count > 0)
+                    {
+                        MyCanvas.SelectionMoved -= MyCanvas_SelectionMoved;
+                        MyCanvas.SelectionResized -= MyCanvas_SelectionResized;
+
+                        strokesToTransform.Transform(matrix, false);
+
+                        MyCanvas.SelectionMoved += MyCanvas_SelectionMoved;
+                        MyCanvas.SelectionResized += MyCanvas_SelectionResized;
+                    }
+
+                    // Apply transform cho TextBlock children + lưu actionId để Phase 3 tái áp dụng
+                    if (parts.Length >= 4 && !string.IsNullOrWhiteSpace(parts[3]))
+                    {
+                        var allTbs = MyCanvas.Children.OfType<TextBlock>().ToList();
+                        foreach (var idxStr in parts[3].Split(','))
+                        {
+                            if (int.TryParse(idxStr.Trim(), out int ci) && ci >= 0 && ci < allTbs.Count)
+                            {
+                                var tb = allTbs[ci];
+                                double l = InkCanvas.GetLeft(tb); if (double.IsNaN(l)) l = 0;
+                                double t = InkCanvas.GetTop(tb);  if (double.IsNaN(t)) t = 0;
+                                InkCanvas.SetLeft(tb, l * scaleX + offsetX);
+                                InkCanvas.SetTop(tb,  t * scaleY + offsetY);
+
+                                // Lưu actionId thay vì index để ổn định sau rebuild
+                                if (_childToAction.TryGetValue(tb, out var textAct) &&
+                                    !ntEntry.TextActionIds.Contains(textAct.Id))
+                                    ntEntry.TextActionIds.Add(textAct.Id);
+                            }
+                        }
+                    }
+
+                    // Đẩy vào danh sách transforms để Phase 3 của RedrawAllFromActions tái áp dụng.
+                    // Cho phép tích luỹ (forward + reverse = identity) nên list không cần xoá từng entry.
+                    if (ntEntry.StrokeGroupIds.Count > 0 || ntEntry.TextActionIds.Count > 0)
+                        _activeNetworkTransforms.Add(ntEntry);
                 }
-                catch (Exception ex)
-                {
-                    Console.WriteLine("Lỗi đồng bộ dịch chuyển vùng chọn: " + ex.Message);
-                }
-            });
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine("Lỗi đồng bộ dịch chuyển vùng chọn: " + ex.Message);
+            }
         }
     }
 

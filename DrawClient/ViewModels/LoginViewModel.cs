@@ -18,26 +18,23 @@ namespace DrawClient.ViewModels
         public ICommand ConnectCommand { get; }
         public Action GoToLobby { get; set; }
 
-        public static string CurrentMasterIp { get; set; } = "127.0.0.1";
-        public static int CurrentMasterPort { get; set; } = 5000;
+        public static string CurrentMasterIp { get; set; } = AppConfig.MasterServerIp;
+        public static int CurrentMasterPort { get; set; } = AppConfig.MasterServerPort;
         public static string Token { get; set; }
         public static int CurrentUserId { get; set; }
 
-        // SỬA TRIỆT ĐỂ TẠI ĐÂY: Khởi tạo sẵn giá trị mặc định là "tula"
-        // Như vậy dù bạn có test bỏ qua Đăng nhập, nó vẫn sẽ gửi tên "tula" thay vì rỗng.
-        public static string CurrentUsername { get; set; } = "tula";
+        public static string CurrentUsername { get; set; } = string.Empty;
 
         private readonly HttpClient _httpClient = new HttpClient();
 
         public LoginViewModel()
         {
             ConnectCommand = new RelayCommand(async (obj) => await ExecuteConnect());
-            ServerIp = "127.0.0.1";
-            Port = "5000";
+            ServerIp = AppConfig.MasterServerIp;
+            Port = "5274";
 
-            // Đặt UI cũng hiển thị mặc định tên bạn
-            Username = "tula";
-            Password = "123456";
+            Username = string.Empty;
+            Password = string.Empty;
         }
 
         private async Task ExecuteConnect()
@@ -53,7 +50,7 @@ namespace DrawClient.ViewModels
                 string json = JsonSerializer.Serialize(loginReq);
                 var content = new StringContent(json, Encoding.UTF8, "application/json");
 
-                var response = await _httpClient.PostAsync("http://localhost:5274/api/auth/login", content);
+                var response = await _httpClient.PostAsync($"http://{ServerIp}:{Port}/api/auth/login", content);
                 string responseJson = await response.Content.ReadAsStringAsync();
 
                 if (!response.IsSuccessStatusCode)
@@ -67,12 +64,16 @@ namespace DrawClient.ViewModels
 
                 if (result == null || result.user == null) return;
 
+                if (string.IsNullOrEmpty(result.token))
+                {
+                    MessageBox.Show("Login thất bại: Server không trả về token.");
+                    return;
+                }
+
                 // Lưu dữ liệu Auth
                 Token = result.token;
                 CurrentUserId = result.user.user_id;
-
-                // Ghi đè tên mới nếu người dùng thực sự có nhập ở màn hình Đăng nhập
-                CurrentUsername = string.IsNullOrWhiteSpace(Username) ? "tula" : Username;
+                CurrentUsername = result.user.username ?? Username;
 
                 // Gán cho socket
                 ClientSocket.Instance.CurrentUserId = CurrentUserId;

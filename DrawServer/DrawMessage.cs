@@ -25,15 +25,17 @@ namespace DrawServer
         public string shapeType { get; set; }
 
         public string text { get; set; }
-
         public double fontSize { get; set; }
+        public string fontFamily { get; set; }
 
         // Dữ liệu chat
         public string username { get; set; }
         public string content { get; set; }
         public DateTime timestamp { get; set; }
-        public string actionToUndoId { get; set; } // ID của action bị undo
-        public int undoCount { get; set; } // Số lần undo
+        public string actionToUndoId { get; set; }
+        public string actionId { get; set; }
+        public string strokeGroupId { get; set; }
+        public int undoCount { get; set; }
         public List<DrawMessage> actions { get; set; }
     }
 }

@@ -13,8 +13,13 @@ namespace DrawClient.Views
         private bool isLoginMode = true;
         private static readonly HttpClient httpClient = new HttpClient();
 
-        // LƯU Ý: Đổi cổng 5274 thành cổng Web API của bạn
-        private readonly string ApiBaseUrl = "http://localhost:5274/api/auth";
+        private string GetApiBaseUrl()
+        {
+            var vm = this.DataContext as LoginViewModel;
+            if (vm != null)
+                return $"http://{vm.ServerIp}:{vm.Port}/api/auth";
+            return $"http://{LoginViewModel.CurrentMasterIp}:{LoginViewModel.CurrentMasterPort}/api/auth";
+        }
 
         public LoginScreen()
         {
@@ -81,7 +86,7 @@ namespace DrawClient.Views
                 string jsonPayload = JsonSerializer.Serialize(payload);
                 var content = new StringContent(jsonPayload, Encoding.UTF8, "application/json");
 
-                HttpResponseMessage response = await httpClient.PostAsync($"{ApiBaseUrl}{endpoint}", content);
+                HttpResponseMessage response = await httpClient.PostAsync($"{GetApiBaseUrl()}{endpoint}", content);
                 string responseBody = await response.Content.ReadAsStringAsync();
 
                 if (response.IsSuccessStatusCode)
@@ -110,6 +115,15 @@ namespace DrawClient.Views
                             // BỔ SUNG: Cập nhật username ngay khi đăng nhập thành công
                             LoginViewModel.CurrentUsername = username;
                             ClientSocket.Instance.CurrentUsername = username;
+
+                            // Save server IP/Port so LobbyViewModel can reach the correct MasterServer
+                            var vm = this.DataContext as LoginViewModel;
+                            if (vm != null)
+                            {
+                                LoginViewModel.CurrentMasterIp = vm.ServerIp;
+                                if (int.TryParse(vm.Port, out int masterPort))
+                                    LoginViewModel.CurrentMasterPort = masterPort;
+                            }
 
                             System.Diagnostics.Debug.WriteLine(
                                 "[LOGIN USER ID] = " + userId);

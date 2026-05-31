@@ -22,6 +22,9 @@ namespace DrawClient
         private StringBuilder buffer = new StringBuilder();
         private string currentRoomId;
 
+        // Cache HISTORY để CanvasViewModel có thể nhận lại nếu subscribe trễ hơn khi JOIN
+        public string LastHistoryJson { get; private set; }
+
         public int CurrentUserId { get; set; }
         public string CurrentUsername { get; set; }
 
@@ -86,11 +89,12 @@ namespace DrawClient
                 client.Connect(nodeIp, nodePort);
 
                 stream = client.GetStream();
-                // Reset bộ đệm chuỗi sạch sẽ trước khi nhận dữ liệu phòng mới
+                // Reset bộ đệm và cache history khi kết nối phòng mới
                 lock (_bufferLock)
                 {
                     buffer.Clear();
                 }
+                LastHistoryJson = null;
 
                 _isRunning = true;
 
@@ -287,8 +291,18 @@ namespace DrawClient
 
                     
 
+                    if (type == "HISTORY")
+                        LastHistoryJson = msg; // Cache để CanvasViewModel subscribe trễ vẫn nhận được
+
+                    // PING → respond with PONG để server biết client còn sống
+                    if (type == "PING")
+                    {
+                        try { Send(new DrawMessage { type = "PONG", userId = CurrentUserId }); } catch { }
+                        return;
+                    }
+
                     if (
-                        type == "HISTORY" || 
+                        type == "HISTORY" ||
                         type == "CHAT_HISTORY"||
                         type == "JOIN" ||
                         type == "DRAW" ||
@@ -299,6 +313,8 @@ namespace DrawClient
                         type == "CHAT" ||
                         type == "DELETE_TEXT" ||
                         type == "LEAVE" ||
+                        type == "UNDO" ||
+                        type == "REDO" ||
                         type == "LASER"||
                         type == "TRANSFORM_SELECTION"
                     )

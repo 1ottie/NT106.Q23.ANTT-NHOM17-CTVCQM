@@ -15,8 +15,7 @@ namespace DrawServer
 {
     public class ServerSocket
     {
-        private string connectionString =
-            "server=localhost;database=online_Drawing_DB;user=root;password=";
+        private string connectionString = AppConfig.DbConnectionString;
 
         private TcpListener server;
 
@@ -30,10 +29,16 @@ namespace DrawServer
         // Quản lý thông tin User trên mỗi Connection (UserId, RoomId, Username)
         private ConcurrentDictionary<TcpClient, (int UserId, string RoomId, string Username)> clientMetadata
             = new ConcurrentDictionary<TcpClient, (int UserId, string RoomId, string Username)>();
+
+        // Theo dõi thời điểm nhận tin nhắn cuối từ mỗi client (dùng để phát hiện mất kết nối)
+        private ConcurrentDictionary<TcpClient, DateTime> _lastActivity
+            = new ConcurrentDictionary<TcpClient, DateTime>();
+
+        private const int InactivityTimeoutSeconds = 70; // ~1 phút
         
         private bool _isRunning = true;
         private static readonly HttpClient _httpClient = new HttpClient();
-        private const string MasterApiUrl = "http://localhost:5274/api/room/update-status";
+        private static readonly string MasterApiUrl = $"http://{AppConfig.MasterServerIp}:{AppConfig.MasterServerPort}/api/room/update-status";
 
         public void Start(int port)
         {
@@ -70,18 +75,27 @@ namespace DrawServer
             }
         }
 
-       private async Task HeartbeatCheckAsync(TcpClient client)
+        private async Task HeartbeatCheckAsync(TcpClient client)
         {
             while (_isRunning && client.Connected)
             {
-                await Task.Delay(30000);
+                await Task.Delay(30000); // Gửi PING mỗi 30 giây
                 try
                 {
                     if (!client.Connected) break;
-                    var pingMsg = new DrawMessage { type = "PING" };
-                    string json = JsonSerializer.Serialize(pingMsg) + "\n";
-                    byte[] data = Encoding.UTF8.GetBytes(json);
-                    SendPacketToClient(client, JsonSerializer.Serialize(pingMsg));
+
+                    // Kiểm tra inactivity: nếu client không phản hồi PONG trong InactivityTimeoutSeconds
+                    if (_lastActivity.TryGetValue(client, out DateTime last) &&
+                        (DateTime.UtcNow - last).TotalSeconds > InactivityTimeoutSeconds)
+                    {
+                        Console.ForegroundColor = ConsoleColor.Yellow;
+                        Console.WriteLine($"[NODE SERVER] Inactivity timeout — đóng kết nối client mất mạng.");
+                        Console.ResetColor();
+                        client.Close(); // Kích hoạt finally trong HandleClientAsync → gửi LEAVE cho room
+                        break;
+                    }
+
+                    SendPacketToClient(client, JsonSerializer.Serialize(new DrawMessage { type = "PING" }));
                 }
                 catch { break; }
             }
@@ -92,8 +106,12 @@ namespace DrawServer
         {
             using (NetworkStream stream = client.GetStream())
             {
+                // Timeout đọc: nếu client không gửi gì (kể cả PONG) trong 70s → coi là mất mạng
+                stream.ReadTimeout = InactivityTimeoutSeconds * 1000;
+
                 byte[] bytes = new byte[8192]; // Buffer lớn hơn một chút
                 StringBuilder messageBuffer = new StringBuilder();
+                _lastActivity[client] = DateTime.UtcNow;
                 _ = HeartbeatCheckAsync(client);
                 bool isGracefulLeave = false;
 
@@ -127,9 +145,8 @@ namespace DrawServer
                     }
                 }
 
-                catch (Exception ex)
+                catch (Exception)
                 {
-                    
                 }
                 finally
                 {
@@ -162,7 +179,10 @@ namespace DrawServer
                         _ = NotifyMasterStatusChanged(targetUserId, int.Parse(targetRoomId), false);
                     }
 
-                    // 2. Xóa client khỏi danh sách phòng của Server trước 
+                    // Xóa entry inactivity tracking
+                    _lastActivity.TryRemove(client, out _);
+
+                    // 2. Xóa client khỏi danh sách phòng của Server trước
                     // (Để khi broadcast, Server không gửi ngược lại chính socket đã chết này)
                     RemoveClientFromAllRooms(client);
                     client.Close();
@@ -210,10 +230,24 @@ namespace DrawServer
                 var msg = JsonSerializer.Deserialize<DrawMessage>(jsonMsg, options);
                 if (msg == null) return false;
 
+                // Cập nhật thời gian hoạt động cuối cho mỗi tin nhắn nhận được
+                _lastActivity[client] = DateTime.UtcNow;
+
+                // PONG: client phản hồi heartbeat — chỉ cập nhật timestamp, không broadcast
+                if (msg.type == "PONG")
+                    return false;
+
                 if (msg.type == "JOIN")
                 {
                     // Phân loại phòng: Lấy danh sách client của phòng này, hoặc tạo mới nếu phòng chưa tồn tại
                     var room = rooms.GetOrAdd(msg.roomId, _ => new ConcurrentDictionary<TcpClient, byte>());
+
+                    // Lưu metadata ngay lập tức để các tin nhắn tiếp theo (DRAW, UNDO...) có thể truy cập
+                    clientMetadata[client] = (msg.userId, msg.roomId, msg.username);
+
+                    // Thêm client vào phòng NGAY LẬP TỨC để không bỏ lỡ broadcast trong thời gian chờ
+                    room[client] = 0;
+
                     // Gửi thông tin của những người ĐANG Ở SẴN trong phòng cho thành viên MỚI VÀO
                     // DÙNG TASK CHỜ 500MS ĐỂ GIAO DIỆN CLIENT KỊP LOAD XONG
                     Task.Run(async () =>
@@ -235,11 +269,6 @@ namespace DrawServer
                                 SendPacketToClient(client, JsonSerializer.Serialize(existingUserMsg));
                             }
                         }
-
-                        room[client] = 0; // Thêm client vào phòng
-                                          // Lưu lại Metadata để xử lý khi thoát
-                                          // Lưu ý: Client cần gửi kèm userId trong gói tin JOIN
-                        clientMetadata[client] = (msg.userId, msg.roomId, msg.username);
                         using (var conn = new MySqlConnection(connectionString))
                         {
                             conn.Open();
@@ -332,15 +361,29 @@ namespace DrawServer
 
                 else if (msg.type == "UNDO")
                 {
-                    // Broadcast UNDO command để tất cả client cùng undo
-                    string undoJson = JsonSerializer.Serialize(msg);
-                    BroadcastToRoom(msg.roomId, undoJson, client);
+                    if (!clientMetadata.TryGetValue(client, out var metadata))
+                    {
+                        Console.WriteLine("[NODE - WARN] UNDO từ client chưa có metadata, bỏ qua.");
+                        return false;
+                    }
+                    msg.userId = metadata.UserId;
+                    msg.username = metadata.Username;
+
+                    SaveDrawAction(msg);
+                    BroadcastToRoom(msg.roomId, JsonSerializer.Serialize(msg), client);
                 }
                 else if (msg.type == "REDO")
                 {
-                    // Broadcast REDO command để tất cả client cùng redo
-                    string redoJson = JsonSerializer.Serialize(msg);
-                    BroadcastToRoom(msg.roomId, redoJson, client);
+                    if (!clientMetadata.TryGetValue(client, out var metadata))
+                    {
+                        Console.WriteLine("[NODE - WARN] REDO từ client chưa có metadata, bỏ qua.");
+                        return false;
+                    }
+                    msg.userId = metadata.UserId;
+                    msg.username = metadata.Username;
+
+                    SaveDrawAction(msg);
+                    BroadcastToRoom(msg.roomId, JsonSerializer.Serialize(msg), client);
                 }
                 else if (msg.type == "LEAVE")
                 {
@@ -379,7 +422,7 @@ namespace DrawServer
 
                 var registerPayload = new
                 {
-                    ip_address = "127.0.0.1", // Nếu chạy khác máy, hãy đổi thành IP LAN/WAN của máy này
+                    ip_address = AppConfig.NodeIp,
                     port = _currentNodePort
                 };
 
@@ -387,7 +430,7 @@ namespace DrawServer
                 var content = new StringContent(jsonString, Encoding.UTF8, "application/json");
 
                 // Gửi POST Request lên API của Master Server (Cổng 5274)
-                var response = await _httpClient.PostAsync("http://localhost:5274/api/node/register", content);
+                var response = await _httpClient.PostAsync($"http://{AppConfig.MasterServerIp}:{AppConfig.MasterServerPort}/api/node/register", content);
 
                 if (response.IsSuccessStatusCode)
                 {
@@ -411,7 +454,7 @@ namespace DrawServer
             catch (Exception ex)
             {
                 Console.ForegroundColor = ConsoleColor.Red;
-                Console.WriteLine($"[NODE SERVER] LỖI MẠNG: Không thể kết nối tới Master Server tại địa chỉ http://localhost:5274");
+                Console.WriteLine($"[NODE SERVER] LỖI MẠNG: Không thể kết nối tới Master Server tại http://{AppConfig.MasterServerIp}:{AppConfig.MasterServerPort}");
                 Console.WriteLine($"[NODE SERVER] Chi tiết lỗi: {ex.Message}");
                 Console.ResetColor();
             }
@@ -463,8 +506,9 @@ namespace DrawServer
                 // KHÓA luồng stream: Chỉ 1 tác vụ được ghi dữ liệu tại 1 thời điểm
                 lock (client)
                 {
-                    client.GetStream().Write(data, 0, data.Length);
-                    client.GetStream().Flush();
+                    var stream = client.GetStream();
+                    stream.Write(data, 0, data.Length);
+                    stream.Flush();
                 }
             }
             catch (Exception ex)
