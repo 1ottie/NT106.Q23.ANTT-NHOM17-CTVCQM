@@ -19,3 +19,4 @@ Release/
 /MasterServer/appsettings.Development.json
 
 !/MasterServer/appsettings.Example.json
+/README.md
