@@ -34,7 +34,7 @@ namespace DrawServer
         private ConcurrentDictionary<TcpClient, DateTime> _lastActivity
             = new ConcurrentDictionary<TcpClient, DateTime>();
 
-        private const int InactivityTimeoutSeconds = 70; // ~1 phút
+        private const int InactivityTimeoutSeconds = 15; // phát hiện mất kết nối nhanh hơn
         
         private bool _isRunning = true;
         private static readonly HttpClient _httpClient = new HttpClient();
@@ -79,7 +79,7 @@ namespace DrawServer
         {
             while (_isRunning && client.Connected)
             {
-                await Task.Delay(30000); // Gửi PING mỗi 30 giây
+                await Task.Delay(5000); // Gửi PING mỗi 5 giây
                 try
                 {
                     if (!client.Connected) break;
@@ -132,7 +132,11 @@ namespace DrawServer
                             string singleMessage = currentContent.Substring(0, nextLineIndex).Trim();
                             if (!string.IsNullOrEmpty(singleMessage))
                             {
-                                if (ProcessLogic(client, singleMessage))
+                                string decrypted;
+                                try { decrypted = EncryptionHelper.Decrypt(singleMessage); }
+                                catch { decrypted = null; }
+
+                                if (decrypted != null && ProcessLogic(client, decrypted))
                                 {
                                     isGracefulLeave = true;
                                 }
@@ -500,8 +504,9 @@ namespace DrawServer
             if (client == null || !client.Connected) return;
             try
             {
-                if (!rawJson.EndsWith("\n")) rawJson += "\n";
-                byte[] data = Encoding.UTF8.GetBytes(rawJson);
+                string payload = rawJson.TrimEnd('\n');
+                string encrypted = EncryptionHelper.Encrypt(payload) + "\n";
+                byte[] data = Encoding.UTF8.GetBytes(encrypted);
 
                 // KHÓA luồng stream: Chỉ 1 tác vụ được ghi dữ liệu tại 1 thời điểm
                 lock (client)

@@ -1,4 +1,5 @@
-﻿using System.Windows;
+﻿using System.ComponentModel;
+using System.Windows;
 using DrawClient.ViewModels;
 
 namespace DrawClient
@@ -14,5 +15,10 @@ namespace DrawClient
             this.DataContext = new MainViewModel();
         }
 
+        protected override void OnClosing(CancelEventArgs e)
+        {
+            try { ClientSocket.Instance?.LeaveRoom(); } catch { }
+            base.OnClosing(e);
+        }
     }
 }

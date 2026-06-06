@@ -273,9 +273,16 @@ namespace DrawClient.ViewModels
 
             AccountManagerCommand = new RelayCommand(_ =>
             {
+                string username = LoginViewModel.CurrentUsername
+                    ?? ClientSocket.Instance.CurrentUsername
+                    ?? "Unknown";
+                int userId = LoginViewModel.CurrentUserId > 0
+                    ? LoginViewModel.CurrentUserId
+                    : ClientSocket.Instance.CurrentUserId;
+
                 MessageBox.Show(
-                    "Open Account Manager",
-                    "Account",
+                    $"Username: {username}\nUser ID: {userId}",
+                    "Account Info",
                     MessageBoxButton.OK,
                     MessageBoxImage.Information);
 
@@ -694,13 +701,17 @@ namespace DrawClient.ViewModels
                             if (h != null) _rawHistory.Add(h);
                         }
 
+                        // Snapshot để tránh race condition khi socket thread modify _rawHistory
+                        // trong lúc InvokeUI lambda đang iterate trên UI thread
+                        var historySnapshot = _rawHistory.ToList();
+
                         // Tính tập hợp message active (không bị UNDO) trực tiếp từ raw history
                         // — không bị giới hạn MAX_HISTORY của UndoRedoManager
-                        var activeMessages = ComputeActiveMessages(_rawHistory);
+                        var activeMessages = ComputeActiveMessages(historySnapshot);
 
                         // Cập nhật UndoRedoManager để tính năng Undo/Redo hoạt động sau khi vào phòng
                         UndoRedoManager.Clear();
-                        foreach (var draw in _rawHistory)
+                        foreach (var draw in historySnapshot)
                         {
                             if (draw.type == "DRAW" || draw.type == "ERASE" || draw.type == "SHAPE" || draw.type == "TEXT")
                             {
@@ -723,6 +734,9 @@ namespace DrawClient.ViewModels
                                 };
                                 if (!string.IsNullOrEmpty(draw.actionId))
                                     action.Id = draw.actionId;
+                                // Khôi phục AffectedActionIds cho ERASE-text (dùng text field làm carrier)
+                                if (draw.type == "ERASE" && !string.IsNullOrEmpty(draw.text))
+                                    action.AffectedActionIds = new List<string> { draw.text };
                                 UndoRedoManager.AddAction(action);
                                 draw.actionId = action.Id;
                             }
@@ -756,7 +770,7 @@ namespace DrawClient.ViewModels
                             var currentStrokeList = new List<DrawMessage>();
                             var seenDrawGroups = new HashSet<string>();
 
-                            foreach (var h in _rawHistory)
+                            foreach (var h in historySnapshot)
                             {
                                 if (activeSet.Contains(h))
                                 {
@@ -772,6 +786,11 @@ namespace DrawClient.ViewModels
                                             currentStrokeList.Add(h);
                                     }
                                 }
+                                else if (h.type == "DELETE_TEXT")
+                                {
+                                    // DELETE_TEXT luôn active — dispatch để xóa TextBlock cũ khỏi canvas
+                                    DispatchDraw(h);
+                                }
                                 else if (h.type == "TRANSFORM_SELECTION" && !string.IsNullOrEmpty(h.text))
                                 {
                                     bool indexSafe = true;
@@ -783,10 +802,9 @@ namespace DrawClient.ViewModels
                                             string trimmed = idxStr.Trim();
                                             if (string.IsNullOrEmpty(trimmed)) continue;
 
-                                            if (trimmed.StartsWith("G:"))
+                                            if (trimmed.StartsWith("G:") || trimmed.StartsWith("T:"))
                                             {
-                                                // GroupId-based: luôn an toàn — lookup theo groupId
-                                                // sẽ tự trả về null nếu group không tồn tại
+                                                // GroupId/TextActionId-based: luôn an toàn
                                                 continue;
                                             }
                                             else if (int.TryParse(trimmed, out int idx))
@@ -905,6 +923,9 @@ namespace DrawClient.ViewModels
                                 };
                                 if (!string.IsNullOrEmpty(drawMsg.actionId))
                                     eraseAction.Id = drawMsg.actionId;
+                                // text field carries original text's actionId for precise TextBlock removal on undo/redo
+                                if (!string.IsNullOrEmpty(drawMsg.text))
+                                    eraseAction.AffectedActionIds = new List<string> { drawMsg.text };
                                 UndoRedoManager.AddAction(eraseAction);
                                 UpdateHistoryUI();
                             }
@@ -942,7 +963,8 @@ namespace DrawClient.ViewModels
                             break;
 
                         case "TEXT":
-                            DispatchDraw(drawMsg);
+                            // Thêm vào UndoRedoManager TRƯỚC DispatchDraw để DrawText có thể
+                            // map _childToAction và _actionIdToChild đúng (giống SHAPE).
                             if (drawMsg.userId != ClientSocket.Instance.CurrentUserId)
                             {
                                 var textAction = new DrawAction(
@@ -965,6 +987,7 @@ namespace DrawClient.ViewModels
                                 UndoRedoManager.AddAction(textAction);
                                 UpdateHistoryUI();
                             }
+                            DispatchDraw(drawMsg);
                             break;
 
                         case "UNDO":
@@ -1252,7 +1275,7 @@ namespace DrawClient.ViewModels
                 text = transformData
             });
         }
-        public DrawAction SendText(string text, Point p, double width, double height, double fontSize = 14, string fontFamily = null, string color = null)
+        public DrawAction SendText(string text, Point p, double width, double height, double fontSize = 14, string fontFamily = null, string color = null, string strokeGroupId = null)
         {
             fontFamily = fontFamily ?? Toolbar.CurrentTextFont;
             color = color ?? Toolbar.CurrentTextColor;
@@ -1269,7 +1292,8 @@ namespace DrawClient.ViewModels
             {
                 Text = text,
                 FontSize = fontSize,
-                FontFamily = fontFamily
+                FontFamily = fontFamily,
+                StrokeGroupId = strokeGroupId
             };
             UndoRedoManager.AddAction(textAction);
             UpdateHistoryUI();

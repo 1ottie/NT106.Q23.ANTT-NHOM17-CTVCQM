@@ -1,4 +1,5 @@
-﻿using DrawClient.Models;
+﻿using DrawClient.Helpers;
+using DrawClient.Models;
 using System;
 using System.Net.Sockets;
 using System.Text;
@@ -215,7 +216,15 @@ namespace DrawClient
 
                             if (!string.IsNullOrWhiteSpace(msg))
                             {
-                                HandleMessage(msg);
+                                try
+                                {
+                                    string decrypted = EncryptionHelper.Decrypt(msg);
+                                    HandleMessage(decrypted);
+                                }
+                                catch
+                                {
+                                    // Gói tin không hợp lệ hoặc không mã hóa — bỏ qua
+                                }
                             }
                         }
                     }
@@ -254,9 +263,10 @@ namespace DrawClient
                 if (stream == null || client == null || !client.Connected)
                     return;
 
-                string json = JsonSerializer.Serialize(obj) + "\n";
+                string json = JsonSerializer.Serialize(obj);
+                string encrypted = EncryptionHelper.Encrypt(json) + "\n";
 
-                byte[] data = Encoding.UTF8.GetBytes(json);
+                byte[] data = Encoding.UTF8.GetBytes(encrypted);
 
                 // Gửi dữ liệu bất tuần tự an toàn
                 lock (stream)

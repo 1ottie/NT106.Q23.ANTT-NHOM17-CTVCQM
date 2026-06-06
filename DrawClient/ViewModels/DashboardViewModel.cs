@@ -24,14 +24,13 @@ namespace DrawClient.ViewModels
         public int max_users { get; set; }
         public bool is_private { get; set; }
         public int player_count { get; set; }
+        public string owner_name { get; set; }
 
         public string Id => room_id.ToString();
         public string Name => room_name;
-        public string Host => "Admin";
-
+        public string Host => !string.IsNullOrEmpty(owner_name) ? owner_name : "Unknown";
         public int PlayerCount => player_count;
-
-        public string HostAvatar => "R";
+        public string HostAvatar => !string.IsNullOrEmpty(Host) ? Host.Substring(0, 1).ToUpper() : "?";
         public string PlayerCountText => $"{PlayerCount} players";
     }
 
@@ -57,8 +56,27 @@ namespace DrawClient.ViewModels
             {
                 _rooms = value;
                 OnPropertyChanged();
+                OnPropertyChanged(nameof(FilteredRooms));
             }
         }
+
+        private string _searchText = "";
+        public string SearchText
+        {
+            get => _searchText;
+            set
+            {
+                _searchText = value;
+                OnPropertyChanged();
+                OnPropertyChanged(nameof(FilteredRooms));
+            }
+        }
+
+        public IEnumerable<Room> FilteredRooms =>
+            string.IsNullOrWhiteSpace(SearchText)
+                ? _rooms
+                : _rooms?.Where(r => r.room_name != null &&
+                    r.room_name.IndexOf(SearchText, StringComparison.OrdinalIgnoreCase) >= 0);
 
         // FIX: dùng static HttpClient
         private static readonly HttpClient _httpClient = new HttpClient();
@@ -209,7 +227,15 @@ namespace DrawClient.ViewModels
             ToggleProfilePopoverCommand = new RelayCommand(obj =>
                 IsProfilePopoverVisible = !IsProfilePopoverVisible);
 
-            AccountManagerCommand = new RelayCommand(obj => { });
+            AccountManagerCommand = new RelayCommand(obj =>
+            {
+                MessageBox.Show(
+                    $"Username: {LoginViewModel.CurrentUsername}\nUser ID: {LoginViewModel.CurrentUserId}",
+                    "Account Info",
+                    MessageBoxButton.OK,
+                    MessageBoxImage.Information);
+                IsProfilePopoverVisible = false;
+            });
 
             _refreshTimer = new DispatcherTimer { Interval = TimeSpan.FromSeconds(5) };
             _refreshTimer.Tick += async (s, e) => await LoadRooms(silent: true);

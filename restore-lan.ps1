@@ -26,7 +26,7 @@ Set-Content -Path $clientConfig -Value $clientContent -Encoding UTF8
 Write-Host "[OK] DrawClient\config.ini -> $lanIp : 5274" -ForegroundColor Green
 
 # --- DrawServer ---
-$serverRaw = Get-Content $serverConfig -Raw
+$serverRaw = Get-Content $serverConfig -Raw -Encoding UTF8
 $serverRaw = $serverRaw -replace "(?m)^NodeIp=.*",   "NodeIp=$lanIp"
 $serverRaw = $serverRaw -replace "(?m)^NodePort=.*",  "NodePort=6001"
 $serverRaw = $serverRaw -replace "(?m)^MasterServerIp=.*", "MasterServerIp=$lanIp"

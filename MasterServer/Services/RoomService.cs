@@ -159,9 +159,11 @@ public class RoomService
 
         var rooms = conn.Query(@"
         SELECT r.*, n.ip_address, n.port,
-        (SELECT COUNT(*) FROM RoomMembers rm WHERE rm.room_id = r.room_id AND rm.is_online = 1) as player_count
+        (SELECT COUNT(*) FROM RoomMembers rm WHERE rm.room_id = r.room_id AND rm.is_online = 1) as player_count,
+        u.username as owner_name
         FROM Rooms r
         LEFT JOIN Nodes n ON r.node_id = n.node_id
+        LEFT JOIN Users u ON r.owner_id = u.user_id
         ORDER BY r.created_at DESC").ToList();
 
         return rooms.Select(r => new RoomListDto
@@ -171,7 +173,8 @@ public class RoomService
             is_private = Convert.ToBoolean(r.is_private),
             max_users = Convert.ToInt32(r.max_users),
             created_at = (DateTime)r.created_at,
-            player_count = Convert.ToInt32(r.player_count)
+            player_count = Convert.ToInt32(r.player_count),
+            owner_name = (string)(r.owner_name ?? "Unknown")
         }).ToList();
     }
 
