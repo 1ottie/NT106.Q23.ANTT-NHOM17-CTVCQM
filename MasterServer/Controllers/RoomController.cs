@@ -11,12 +11,10 @@ using System.Linq;
 public class RoomController : ControllerBase
 {
     private readonly RoomService _roomService;
-    private readonly NodeService _nodeService;
 
-    public RoomController(RoomService roomService, NodeService nodeService)
+    public RoomController(RoomService roomService)
     {
         _roomService = roomService;
-        _nodeService = nodeService;
     }
 
     private int GetUserId()
@@ -30,20 +28,6 @@ public class RoomController : ControllerBase
         }
 
         return int.Parse(claim.Value);
-    }
-
-    private NodeInfo GetBestNode()
-    {
-        var activeNode = _nodeService.GetAnyActiveNode();
-        if (activeNode == null) return null;
-
-        return new NodeInfo
-        {
-            Ip = activeNode.ip_address,
-            Port = activeNode.port,
-            MaxUsers = 100,
-            CurrentUsers = 0
-        };
     }
 
     // --- ENDPOINT MỚI CHO NODE SERVER ---
@@ -74,29 +58,13 @@ public class RoomController : ControllerBase
             Console.ForegroundColor = ConsoleColor.Blue;
             Console.WriteLine($"[MASTER - ROOM] User ID {userId} yêu cầu tạo phòng vẽ mới: '{req.room_name}'");
             Console.ResetColor();
-            var room = _roomService.CreateRoom(req, userId);
-
-            // ĐIỀU HƯỚNG TỚI NODE
-            var node = GetBestNode();
-            if (node == null)
-            {
-                Console.ForegroundColor = ConsoleColor.Red;
-                Console.WriteLine($"[MASTER - LOAD BALANCER] THẤT BẠI: Từ chối tạo phòng của User {userId} do không tìm thấy Node khả dụng.");
-                Console.ResetColor();
-                return BadRequest(new { message = "Hệ thống máy chủ vẽ đang quá tải!" });
-            }
+            var result = _roomService.CreateRoom(req, userId);
 
             Console.ForegroundColor = ConsoleColor.Green;
-            Console.WriteLine($"[MASTER SERVER] Tạo phòng thành công. Điều hướng User {userId} sang Node [{node.Ip}:{node.Port}]");
+            Console.WriteLine($"[MASTER SERVER - LOAD BALANCER] Tạo phòng thành công. Least connection chọn Node [{result.nodeIp}:{result.nodePort}] ({result.currentUsers} users online).");
             Console.ResetColor();
 
-            // Gộp thông tin phòng và cấu hình Node trả về cho WPF
-            return Ok(new
-            {
-                roomInfo = room,
-                nodeIp = node.Ip,
-                nodePort = node.Port
-            });
+            return Ok(result);
         }
         catch (Exception ex) { return BadRequest(new { message = ex.Message }); }
     }
@@ -111,30 +79,13 @@ public class RoomController : ControllerBase
             Console.WriteLine($"[MASTER - ROOM] User ID {userId} gửi yêu cầu xin tham gia vào phòng ID: {req.room_id}");
             Console.ResetColor();
 
-            var room = _roomService.JoinRoom(req, userId);
-            if (room == null) return NotFound(new { message = "Room not found" });
-
-            // ĐIỀU HƯỚNG TỚI NODE
-            var node = GetBestNode();
-            if (node == null)
-            {
-                Console.ForegroundColor = ConsoleColor.Red;
-                Console.WriteLine($"[MASTER SERVER - LOAD BALANCER] THẤT BẠI: Từ chối điều hướng User {userId} do không tìm thấy Node khả dụng.");
-                Console.ResetColor();
-
-                return BadRequest(new { message = "Hệ thống máy chủ vẽ đang quá tải!" });
-            }
+            var result = _roomService.JoinRoom(req, userId);
 
             Console.ForegroundColor = ConsoleColor.Green;
-            Console.WriteLine($"[MASTER SERVER - LOAD BALANCER] ĐIỀU HƯỚNG THÀNH CÔNG: User {userId} -> Node [{node.Ip}:{node.Port}]");
+            Console.WriteLine($"[MASTER SERVER - LOAD BALANCER] ĐIỀU HƯỚNG THÀNH CÔNG: User {userId} -> Node [{result.nodeIp}:{result.nodePort}] ({result.currentUsers} users online).");
             Console.ResetColor();
 
-            return Ok(new
-            {
-                roomInfo = room,
-                nodeIp = node.Ip,
-                nodePort = node.Port
-            });
+            return Ok(result);
         }
         catch (Exception ex) { return BadRequest(new { message = ex.Message }); }
     }
@@ -174,15 +125,6 @@ public class RoomController : ControllerBase
     {
         return Ok(_roomService.GetMembers(roomId));
     }
-}
-
-// Data Transfer Object cho Node Server
-public class NodeInfo
-{
-    public string Ip { get; set; } = string.Empty;
-    public int Port { get; set; }
-    public int MaxUsers { get; set; }
-    public int CurrentUsers { get; set; }
 }
 
 public class UserStatusUpdateDto
