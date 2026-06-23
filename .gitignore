@@ -21,3 +21,4 @@ Release/
 !/MasterServer/appsettings.Example.json
 /DrawClient/config.ini
 /DrawServer/config.ini
+/MasterServer/appsettings.Development.json
