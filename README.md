@@ -1,6 +1,6 @@
 <div align="center">
 
-CollabDraw
+<h1>CollabDraw</h1>
 
 [![C#](https://img.shields.io/badge/C%23-239120?style=for-the-badge&logo=c-sharp&logoColor=white)](https://docs.microsoft.com/en-us/dotnet/csharp/)
 [![.NET Core](https://img.shields.io/badge/.NET_Core-512BD4?style=for-the-badge&logo=dotnet&logoColor=white)](https://dotnet.microsoft.com/)
@@ -71,11 +71,64 @@ This project also integrates AI as a supporting tool for research purposes, util
 
 ## System Architecture
 
-The application is strictly decoupled into Microservices to ensure scalability and high availability.
+The system separates the HTTP control plane from the realtime TCP data plane. The Master Server handles authentication, room metadata, OCR proxying, and least-connection routing; each Draw Server node focuses on low-latency canvas synchronization.
 
 ```mermaid
-graph TD
+flowchart LR
+    subgraph Client["DrawClient - WPF Desktop"]
+        UI["Lobby, canvas, chat, OCR tools"]
+        HttpClient["HTTP API client"]
+        SocketClient["TCP socket client"]
+    end
+
+    subgraph Master["MasterServer - API Gateway"]
+        Auth["JWT authentication"]
+        RoomApi["Room API"]
+        NodeMgr["Node registry"]
+        Balancer["Least connection balancer"]
+        OcrProxy["OCR proxy"]
+    end
+
+    subgraph Nodes["DrawServer Cluster - TCP Realtime Layer"]
+        NodeA["Node Server :6001"]
+        NodeB["Node Server :6002+"]
+    end
+
+    subgraph Data["Persistence"]
+        Db[("MySQL Database")]
+        Vision["Google Vision API"]
+    end
+
+    HttpClient -->|"login, room list, create/join"| Auth
+    HttpClient -->|"room actions"| RoomApi
+    RoomApi --> Balancer
+    NodeMgr --> Balancer
+    Balancer -->|"pick ACTIVE node with fewest online users"| RoomApi
+    RoomApi -->|"nodeIp + nodePort"| HttpClient
+
+    SocketClient -->|"JOIN, DRAW, CHAT, UNDO, REDO"| NodeA
+    SocketClient -. same protocol .-> NodeB
+    NodeA -->|"broadcast room events"| SocketClient
+    NodeB -. broadcast room events .-> SocketClient
+
+    NodeA -->|"register, heartbeat, user status"| NodeMgr
+    NodeB -. register, heartbeat, user status .-> NodeMgr
+    Auth --> Db
+    RoomApi --> Db
+    NodeMgr --> Db
+    NodeA -->|"draw actions, chat history"| Db
+    NodeB -. draw actions, chat history .-> Db
+    OcrProxy --> Vision
+    HttpClient -->|"selected canvas image"| OcrProxy
 ```
+
+| Layer | Responsibility | Key Implementation |
+| --- | --- | --- |
+| Client | Presents the lobby/canvas UI and connects to the selected realtime node. | WPF, `ClientSocket`, REST calls to MasterServer |
+| Master Server | Authenticates users, tracks nodes/rooms, and returns the best node for each room request. | ASP.NET Core, JWT, Dapper, least-connection routing |
+| Draw Server Nodes | Maintain TCP client sessions and broadcast realtime drawing/chat events inside each room. | `TcpListener`, `NetworkStream`, async socket handling |
+| Database | Stores users, rooms, members, draw actions, messages, and node load state. | MySQL schema in `Database/Online_Drawing_DB.sql` |
+| OCR Service | Extracts text from selected canvas regions through the MasterServer proxy. | Google Vision API integration |
 
 ## Runbook / Installation
 
@@ -131,6 +184,12 @@ This project is a practical application of advanced computer science and network
 
 <div align="center">
 
+| Name | Student ID |
+| :--- |  :--- |
+| **Phan Lê Hoàng Phương** |  24521418 | 
+| **Lê Thị Linh Nhi** | 24521260 | 
+| **Trần Thị Ngọc Như** |  24521279 |
+| **Lê Lâm Bảo Tư** |  24521909 | 
 
 </div>
 
