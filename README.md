@@ -1,16 +1,6 @@
-# NOTE UPDATE 31/5
-
-* vẫn còn vài lỗi undo/redo (nét undo quá nhỏ ->sẽ tối ưu sau)(đã sửa)
-* bấm undo, replay xong nét vẽ pen ko đồng bộ được nữa
-* vào phòng load canvas siêu chậm
-* bấm tool text vào text cũ để sửa size, màu xong thì bị lặp trên máy kia(đã sửa)
-* đọc file LAN_CONNECTION_GUIDE.md để biết cách đổi ip và kết nối mạng
-
-* khi chạy nhớ đổi tk MySQL trong DrawServer/AppConfig.cs, DrawServer/config.ini và MasterServer/appsettings.json
-
 <div align="center">
 
-<img width="100%" height="200" alt="InkSync Banner" src="" />
+CollabDraw
 
 [![C#](https://img.shields.io/badge/C%23-239120?style=for-the-badge&logo=c-sharp&logoColor=white)](https://docs.microsoft.com/en-us/dotnet/csharp/)
 [![.NET Core](https://img.shields.io/badge/.NET_Core-512BD4?style=for-the-badge&logo=dotnet&logoColor=white)](https://dotnet.microsoft.com/)
