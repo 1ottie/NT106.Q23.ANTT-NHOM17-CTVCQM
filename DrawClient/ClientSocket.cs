@@ -23,7 +23,6 @@ namespace DrawClient
         private StringBuilder buffer = new StringBuilder();
         private string currentRoomId;
 
-        // Cache HISTORY để CanvasViewModel có thể nhận lại nếu subscribe trễ hơn khi JOIN
         public string LastHistoryJson { get; private set; }
 
         public int CurrentUserId { get; set; }

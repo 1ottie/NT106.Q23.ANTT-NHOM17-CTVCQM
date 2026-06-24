@@ -11,7 +11,7 @@ namespace DrawClient
         static AppConfig()
         {
             // Giá trị mặc định — dùng khi config.ini không tồn tại
-            MasterServerIp  = "10.45.27.103";
+            MasterServerIp  = "127.0.0.1";
             MasterServerPort = 5274;
 
             string configPath = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "config.ini");

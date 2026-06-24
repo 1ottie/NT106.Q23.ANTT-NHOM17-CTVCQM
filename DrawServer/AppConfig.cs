@@ -14,11 +14,11 @@ namespace DrawServer
         static AppConfig()
         {
             // Giá trị mặc định — dùng khi config.ini không tồn tại
-            NodeIp             = "10.45.27.103";
+            NodeIp             = "127.0.0.1";
             NodePort           = 6001;
-            MasterServerIp     = "10.45.27.103";
+            MasterServerIp     = "127.0.0.1";
             MasterServerPort   = 5274;
-            DbConnectionString = "server=localhost;database=online_Drawing_DB;user=root;password=182806";
+            DbConnectionString = "server=localhost;database=online_Drawing_DB;user=root;password=";
 
             string configPath = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "config.ini");
             if (!File.Exists(configPath)) return;
